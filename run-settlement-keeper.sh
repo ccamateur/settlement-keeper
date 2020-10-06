@@ -35,7 +35,7 @@ then
 fi
 
 
-exec $dir/bin/cage-keeper \
+exec $dir/bin/settlementt-keeper \
   --rpc-host "${SERVER_ETH_RPC_HOST}" \
   --network "${BLOCKCHAIN_NETWORK}" \
   --eth-from "${ETH_FROM_ADDRESS}" \

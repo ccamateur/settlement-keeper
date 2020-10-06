@@ -21,14 +21,14 @@ from os import path
 
 from web3 import Web3, HTTPProvider
 
-from pymaker import Address
-from pymaker.auctions import Flipper, Flapper, Flopper
-from pymaker.deployment import Deployment, DssDeployment
-from pymaker.dss import Vat, Vow, Cat, Jug, Pot
-from pymaker.shutdown import ShutdownModule, End
-from pymaker.keys import register_keys
+from pyflex import Address
+from pyflex.auctions import FixedDiscountCollateralAuctionHouse, EnglishCollateralAuctionHouse, Flapper, DebtAuctionHouse
+from pyflex.deployment import Deployment, GfDeployment
+from pyflex.gf import SAFEEngine, AccountingEngine, LiquidationEngine, TaxCollector
+from pyflex.shutdown import ESM, GlobalSettlement
+from pyflex.keys import register_keys
 
-from src.cage_keeper import CageKeeper
+from src.settlement_keeper import SettlementKeeper
 
 
 @pytest.fixture(scope='session')
@@ -68,7 +68,7 @@ def our_address(web3) -> Address:
     return Address(web3.eth.accounts[0])
 
 @pytest.fixture(scope="session")
-def guy_address(web3) -> Address:
+def high_bidder_address(web3) -> Address:
     return Address(web3.eth.accounts[1])
 
 @pytest.fixture(scope="session")
@@ -89,48 +89,46 @@ def deployment_address(web3) -> Address:
 # def mcd(web3) -> DssDeployment:
 #     # for local dockerized parity testchain
 #     basepath = path.dirname(__file__)
-#     filepath = path.abspath(path.join(basepath, "..", "lib", "pymaker", "config", "testnet-addresses.json"))
-#     pymaker_deployment_config = filepath
+#     filepath = path.abspath(path.join(basepath, "..", "lib", "pyflex", "config", "testnet-addresses.json"))
+#     pyflex_deployment_config = filepath
 #
-#     deployment = DssDeployment.from_json(web3=web3, conf=open(pymaker_deployment_config, "r").read())
+#     deployment = DssDeployment.from_json(web3=web3, conf=open(pyflex_deployment_config, "r").read())
 #     validate_contracts_loaded(deployment)
 #     return deployment
 
 
 @pytest.fixture(scope="session")
-def mcd(web3) -> DssDeployment:
+def geb(web3) -> GfDeployment:
 
-    deployment = DssDeployment.from_network(web3=web3, network="testnet")
+    deployment = GfDeployment.from_network(web3=web3, network="testnet")
     validate_contracts_loaded(deployment)
 
     return deployment
 
 @pytest.fixture(scope="session")
-def keeper(mcd: DssDeployment, keeper_address: Address) -> CageKeeper:
-    keeper = CageKeeper(args=args(f"--eth-from {keeper_address} --network testnet --vat-deployment-block {1}"), web3=mcd.web3)
-    assert isinstance(keeper, CageKeeper)
+def keeper(geb: GfDeployment, keeper_address: Address) -> SettlementKeeper:
+    keeper = SettlementKeeper(args=args(f"--eth-from {keeper_address} --network testnet --safe-engine-deployment-block {1}"), web3=geb.web3)
+    assert isinstance(keeper, SettlementKeeper)
 
     return keeper
 
 def args(arguments: str) -> list:
     return arguments.split()
 
-def validate_contracts_loaded(deployment: DssDeployment):
-    assert isinstance(deployment.vat, Vat)
-    assert deployment.vat.address is not None
-    assert isinstance(deployment.vow, Vow)
-    assert deployment.vow.address is not None
-    assert isinstance(deployment.cat, Cat)
-    assert deployment.cat.address is not None
-    assert isinstance(deployment.jug, Jug)
-    assert deployment.jug.address is not None
+def validate_contracts_loaded(deployment: GfDeployment):
+    assert isinstance(deployment.safe_engine, SAFEEngine)
+    assert deployment.safe_engine.address is not None
+    assert isinstance(deployment.accounting_engine, AccountingEngine)
+    assert deployment.accounting_engine.address is not None
+    assert isinstance(deployment.liquidation_engine, LiquidationEngine)
+    assert deployment.liquidation_engine.address is not None
+    assert isinstance(deployment.tax_collector, TaxCollector)
+    assert deployment.tax_collector.address is not None
     assert isinstance(deployment.flapper, Flapper)
     assert deployment.flapper.address is not None
-    assert isinstance(deployment.flopper, Flopper)
-    assert deployment.flopper.address is not None
-    assert isinstance(deployment.pot, Pot)
-    assert deployment.pot.address is not None
-    assert isinstance(deployment.end, End)
-    assert deployment.end.address is not None
-    assert isinstance(deployment.esm, ShutdownModule)
+    assert isinstance(deployment.debt_auction_house, DebtAuctionHouse)
+    assert deployment.debt_auction_house.address is not None
+    assert isinstance(deployment.end, GlobalSettlement)
+    assert deployment.global_settlement.address is not None
+    assert isinstance(deployment.esm, ESM)
     assert deployment.esm.address is not None
