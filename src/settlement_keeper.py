@@ -28,7 +28,8 @@ from web3 import Web3, HTTPProvider
 
 from pyflex import Address
 from pyflex.gas import DefaultGasPrice, FixedGasPrice
-from pyflex.auctions import FixedDiscountCollateralAuctionHouse, Flapper, DebtAuctionHouse
+from pyflex.auctions import FixedDiscountCollateralAuctionHouse, EnglishCollateralAuctionHouse, DebtAuctionHouse
+from pyflex.auctions import PreSettlementSurplusAuctionHouse, PostSettlementSurplusAuctionHouse
 from pyflex.keys import register_keys
 from pyflex.lifecycle import Lifecycle
 from pyflex.numeric import Wad, Rad, Ray
@@ -42,7 +43,7 @@ from auction_keeper.gas import DynamicGasPrice
 class SettlementKeeper:
     """Keeper to facilitate Emergency Shutdown"""
 
-    logger = logging.getLogger('cage-keeper')
+    logger = logging.getLogger('settlement-keeper')
 
     def __init__(self, args: list, **kwargs):
         """Pass in arguements assign necessary variables/objects and instantiate other Classes"""
@@ -61,7 +62,7 @@ class SettlementKeeper:
         parser.add_argument("--network", type=str, required=True,
                             help="Network that you're running the Keeper on (options, 'mainnet', 'kovan', 'testnet')")
 
-        parser.add_argument('--previous-settlement', dest='settlementFacilitated', action='store_true',
+        parser.add_argument('--previous-settlement', dest='settlement_facilitated', action='store_true',
                             help='Include this argument if this keeper previously helped to facilitate the processing phase of ES')
 
         parser.add_argument("--eth-from", type=str, required=True,
@@ -97,7 +98,7 @@ class SettlementKeeper:
 
 
 
-        parser.set_defaults(settlementFacilitated=False)
+        parser.set_defaults(settlement_facilitated=False)
         self.arguments = parser.parse_args(args)
 
         self.web3 = kwargs['web3'] if 'web3' in kwargs else Web3(HTTPProvider(endpoint_uri=f"https://{self.arguments.rpc_host}:{self.arguments.rpc_port}",
@@ -117,7 +118,7 @@ class SettlementKeeper:
         self.max_errors = self.arguments.max_errors
         self.errors = 0
 
-        self.settlementFacilitated = self.arguments.settlementFacilitated
+        self.settlement_facilitated = self.arguments.settlement_facilitated
 
         self.confirmations = 0
 
@@ -152,7 +153,7 @@ class SettlementKeeper:
         self.logger.info(f'Keeper Balance: {self.web3.eth.getBalance(self.our_address.address) / (10**18)} ETH')
         self.logger.info(f'SAFE Engine: {self.geb.safe_engine.address}')
         self.logger.info(f'Accounting Engine: {self.geb.accounting_engine.address}')
-        self.logger.info(f'Flapper: {self.dss.flapper.address}')
+        self.logger.info(f'PreSettlementSurplusAuctionHouse: {self.geb.surplus_auction_house.address}')
         self.logger.info(f'Debt Auction House: {self.geb.debt_auction_house.address}')
         self.logger.info(f'Tax Collector: {self.geb.tax_collector.address}')
         self.logger.info(f'Global Settlement: {self.geb.global_settlement.address}')
@@ -164,7 +165,7 @@ class SettlementKeeper:
         if self.errors >= self.max_errors:
             self.lifecycle.terminate()
         else:
-            self.check_cage()
+            self.check_settlement()
 
 
     def check_settlement(self):
@@ -172,74 +173,82 @@ class SettlementKeeper:
         blockNumber = self.web3.eth.blockNumber
         self.logger.info(f'Checking settlment on block {blockNumber}')
 
-        live = self.geb.global_settlement.live()
+        contract_enabled = self.geb.global_settlement.contract_enabled()
 
-        # Ensure 12 blocks confirmations have passed before facilitating cage
-        if not live and (self.confirmations == 12):
+        # Ensure 12 blocks confirmations have passed before facilitating settlement
+        if not contract_enabled and (self.confirmations == 12):
             self.logger.info('======== System has been settled ========')
 
             shutdown_time = self.geb.global_settlement.shutdown_time()
             shutdown_cooldown = self.geb.global_settlement.shutdown_cooldown()
-            cooldown_in_unix = shutdown_cooldown.replace(tzinfo=timezone.utc).timestamp()
+            shutdown_time_in_unix = shutdown_time.replace(tzinfo=timezone.utc).timestamp()
             now = self.web3.eth.getBlock(blockNumber).timestamp
-            thawedCage = cooldown_in_unix + shutdown_cooldown 
+            set_outstanding_coin_supply_time = shutdown_time_in_unix + shutdown_cooldown 
 
-            if not self.settlementFacilitated:
-                self.settlementFacilitated = True
+            if not self.settlement_facilitated:
+                self.settlement_facilitated = True
                 self.facilitate_processing_period()
 
             # wait until processing time concludes
-            elif (now >= thawedCage):
-                self.thaw_cage()
+            elif (now >= set_outstanding_coin_supply_time):
+                self.set_outstanding_coin_supply()
 
                 if not (self.arguments.network == 'testnet'):
                     self.lifecycle.terminate()
 
             else:
-                whenThawedCage = datetime.utcfromtimestamp(thawedCage)
+                when_set_outstanding_coin_supply_time = datetime.utcfromtimestamp(set_outstanding_coin_supply_time)
                 self.logger.info('')
-                self.logger.info(f'Cage has been processed and will be thawed on {whenThawedCage.strftime("%m/%d/%Y, %H:%M:%S")} UTC')
+                self.logger.info(f'settlement has been processed and outstanding coin supply will be set on '
+                                 f'{when_set_outstanding_coin_supply_time.strftime("%m/%d/%Y, %H:%M:%S")} UTC')
                 self.logger.info('')
 
-        elif not live and self.confirmations < 13:
+        elif not contract_enabled and self.confirmations < 13:
             self.confirmations = self.confirmations + 1
-            self.logger.info(f'======== System has been caged ( {self.confirmations} confirmations) ========')
+            self.logger.info(f'======== System has been settled ( {self.confirmations} confirmations) ========')
 
 
     def facilitate_processing_period(self):
-        """ Yank all active flap/flop auctions, cage all collateral_types, skip all flip auctions, skim all underwater safes  """
+        """ Prematurely terminated all active surplus/debt auctions,
+        freeze all collateral_types, skip all flip auctions, skim all underwater safes  """
+
         self.logger.info('')
-        self.logger.info('======== Facilitating Cage ========')
+        self.logger.info('======== Facilitating Settlement ========')
         self.logger.info('')
 
         # check collateral_types
         collateral_types = self.get_collateral_types()
+        print("Collateral_types")
+        for x in collateral_types:
+            print(x)
 
-        # Get all auctions that can be yanked after cage
+        # Get all auctions that can be prematurely terminated after shutdown
         auctions = self.all_active_auctions()
 
-        # Yank all flap and flop auctions
-        self.yank_auctions(auctions["flaps"], auctions["flops"])
+        # prematurely terminated all surplus and debt auctions
+        self.terminate_auctions_prematurely(auctions["surplus_auctions"], auctions["debt_auctions"])
 
-        # Cage all collateral_types
+        # Freeze all collateral_types
         for collateral_type in collateral_types:
-            self.geb.global_settlement.cage(collateral_type).transact(gas_price=self.gas_price)
+            self.geb.global_settlement.freeze_collateral_type(collateral_type).transact(gas_price=self.gas_price)
 
-        # Skip all flip auctions
-        for key in auctions["flips"].keys():
-            collateral_type = self.dss.vat.collateral_type(key)
-            for bid in auctions["flips"][key]:
-                self.geb.global_settlement.skip(collateral_type,bid.id).transact(gas_price=self.gas_price)
+        # fast track all collateral auctions
+        for key in auctions["collateral_auctions"].keys():
+            collateral_type = self.geb.safe_engine.collateral_type(key)
+            for bid in auctions["collateral_auctions"][key]:
+                self.geb.global_settlement.fast_track_auction(collateral_type,bid.id).transact(gas_price=self.gas_price)
 
         #get all underwater safes
         safes = self.get_underwater_safes(collateral_types)
 
-        #skim all underwater safes
+        print(f"processing {len(safes)} underwater safes")
+        #process all underwater safes
         for i in safes:
-            self.geb.global_settlement.skim(i.collateral_type, i.address).transact(gas_price=self.gas_price)
+            print(f"processing safe {i}")
+            self.geb.global_settlement.process_safe(i.collateral_type, i.address).transact(gas_price=self.gas_price)
 
 
-    def set_outstandinc_coin_supply(self):
+    def set_outstanding_coin_supply(self):
         """ Once GlobalSettlement.shutdownCooldown is reached, annihilate any lingering system coin in the Accounting Engine,
         set the outstanding coin supply, and set the collateral_cash_price for all collateral_types  """
         self.logger.info('')
@@ -249,10 +258,10 @@ class SettlementKeeper:
         collateral_types = self.get_collateral_types()
 
         # check if system coin is in AccountingEngine and annialate it with Heal()
-        dai = self.dss.vat.dai(self.dss.vow.address)
-        if dai > Rad(0):
+        system_coin = self.geb.safe_engine.coin_balance(self.geb.accounting_engine.address)
+        if system_coin > Rad(0):
             #accounting_engine.transfer_post_settlement_surplus()
-            self.dss.vow.heal(dai).transact(gas_price=self.gas_price)
+            self.geb.accounting_engine.settle_debt(system_coin).transact(gas_price=self.gas_price)
 
         # Fix outstanding supply of System coin
         self.geb.global_settlement.set_outstanding_coin_supply().transact(gas_price=self.gas_price)
@@ -266,7 +275,7 @@ class SettlementKeeper:
         """ Use CollateralTypes as saved in https://github.com/makerdao/pyflex/tree/master/config """
 
         collateral_types = [self.geb.collaterals[key].collateral_type for key in self.geb.collaterals.keys()]
-        collateral_types_with_debt = list(filter(lambda l: self.geb.safe_engine.collateral_type(l.name).generated_debt > Wad(0), collateral_types))
+        collateral_types_with_debt = list(filter(lambda l: self.geb.safe_engine.collateral_type(l.name).safe_debt > Wad(0), collateral_types))
 
         collateral_type_names = [i.name for i in collateral_types_with_debt]
 
@@ -292,13 +301,14 @@ class SettlementKeeper:
             safes = safe_history.get_safes()
 
             self.logger.info(f'Collected {len(safes)} from {collateral_type}')
+            print(f'Collected {len(safes)} from {collateral_type}')
 
             i = 0
             for safe in safes.values():
                 safe.collateral_type = self.geb.safe_engine.collateral_type(safe.collateral_type.name)
-                safety_ratio = self.geb.oracle_relayers.safety_c_ratio(safe.collateral_type)
+                safety_ratio = self.geb.oracle_relayer.safety_c_ratio(safe.collateral_type)
                 debt = Ray(safe.generated_debt) * safe.collateral_type.accumulated_rate
-                collateral = Ray(safe.locked_collateral) * safe.collateral_type.safety_price * safety_c_ratio
+                collateral = Ray(safe.locked_collateral) * safe.collateral_type.safety_price * safety_ratio
                 # Check if underwater ->  
                 # safe.generated_debt * collateral_type.accumulated_rate > 
                 # safe.locked_collateral * collateral_type.safety_price * oracle_relayer.safety_c_ratio[collateral_type]
@@ -321,8 +331,8 @@ class SettlementKeeper:
 
         return {
             "collateral_auctions": collateral_auctions,
-            "flaps": self.cage_active_auctions(self.dss.flapper),
-            "flops": self.settlement_active_auctions(self.geb.debt_auction_house)
+            "surplus_auctions": self.settlement_active_auctions(self.geb.surplus_auction_house),
+            "debt_auctions": self.settlement_active_auctions(self.geb.debt_auction_house)
         }
 
 
@@ -332,8 +342,8 @@ class SettlementKeeper:
         active_auctions = []
         auction_count = parentObj.auctions_started()
 
-        # flip auctions
-        if isinstance(parentObj, FixedDiscountCollateralAuctionHouse):
+        # collateral auctions
+        if isinstance(parentObj, EnglishCollateralAuctionHouse):
             for index in range(1, auction_count + 1):
                 bid = parentObj._bids(index)
                 if bid.high_bidder != Address("0x0000000000000000000000000000000000000000"):
@@ -341,7 +351,7 @@ class SettlementKeeper:
                         active_auctions.append(bid)
                 index += 1
 
-        # flap and debt auctions
+        # surplus and debt auctions
         else:
             for index in range(1, auction_count + 1):
                 bid = parentObj._bids(index)
@@ -349,14 +359,12 @@ class SettlementKeeper:
                     active_auctions.append(bid)
                 index += 1
 
-
         return active_auctions
 
-
     def terminate_auctions_prematurely(self, surplus_bids: List, debt_bids: List):
-        """ Calls Flap.yank and Flop.yank on all auctions ids that meet the cage criteria """
+        """ Calls terminate_auction_prematurely on all PreSettlementSurplusAuctionHouse and DebtAuctionHouseand auctions ids that meet the shutdown criteria """
         for bid in surplus_bids:
-            self.geb.flapper.terminate_auction_prematurely(bid.id).transact(gas_price=self.gas_price)
+            self.geb.surplus_auction_house.terminate_auction_prematurely(bid.id).transact(gas_price=self.gas_price)
 
         for bid in debt_bids:
             self.geb.debt_auction_house.terminate_auction_prematurely(bid.id).transact(gas_price=self.gas_price)

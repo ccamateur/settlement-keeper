@@ -22,15 +22,16 @@ from os import path
 from web3 import Web3, HTTPProvider
 
 from pyflex import Address
-from pyflex.auctions import FixedDiscountCollateralAuctionHouse, EnglishCollateralAuctionHouse, Flapper, DebtAuctionHouse
-from pyflex.deployment import Deployment, GfDeployment
+from pyflex.auctions import FixedDiscountCollateralAuctionHouse, EnglishCollateralAuctionHouse, DebtAuctionHouse
+from pyflex.auctions import PreSettlementSurplusAuctionHouse, PostSettlementSurplusAuctionHouse
+from pyflex.deployment import GfDeployment
 from pyflex.gf import SAFEEngine, AccountingEngine, LiquidationEngine, TaxCollector
 from pyflex.shutdown import ESM, GlobalSettlement
 from pyflex.keys import register_keys
 
 from src.settlement_keeper import SettlementKeeper
 
-
+'''
 @pytest.fixture(scope='session')
 def new_deployment() -> Deployment:
     return Deployment()
@@ -41,6 +42,7 @@ def deployment(new_deployment: Deployment) -> Deployment:
     new_deployment.reset()
     return new_deployment
 
+'''
 
 @pytest.fixture(scope="session")
 def web3() -> Web3:
@@ -68,7 +70,7 @@ def our_address(web3) -> Address:
     return Address(web3.eth.accounts[0])
 
 @pytest.fixture(scope="session")
-def high_bidder_address(web3) -> Address:
+def guy_address(web3) -> Address:
     return Address(web3.eth.accounts[1])
 
 @pytest.fixture(scope="session")
@@ -85,16 +87,18 @@ def deployment_address(web3) -> Address:
     return Address("0x00a329c0648769A73afAc7F9381E08FB43dBEA72")
 
 
-# @pytest.fixture(scope="session")
-# def mcd(web3) -> DssDeployment:
-#     # for local dockerized parity testchain
-#     basepath = path.dirname(__file__)
-#     filepath = path.abspath(path.join(basepath, "..", "lib", "pyflex", "config", "testnet-addresses.json"))
-#     pyflex_deployment_config = filepath
-#
-#     deployment = DssDeployment.from_json(web3=web3, conf=open(pyflex_deployment_config, "r").read())
-#     validate_contracts_loaded(deployment)
-#     return deployment
+'''
+ @pytest.fixture(scope="session")
+ def geb(web3) -> GfDeployment:
+     # for local dockerized parity testchain
+     basepath = path.dirname(__file__)
+     filepath = path.abspath(path.join(basepath, "..", "lib", "pyflex", "config", "testnet-addresses.json"))
+     pyflex_deployment_config = filepath
+
+     deployment = GfDeployment.from_json(web3=web3, conf=open(pyflex_deployment_config, "r").read())
+     validate_contracts_loaded(deployment)
+     return deployment
+'''
 
 
 @pytest.fixture(scope="session")
@@ -124,11 +128,11 @@ def validate_contracts_loaded(deployment: GfDeployment):
     assert deployment.liquidation_engine.address is not None
     assert isinstance(deployment.tax_collector, TaxCollector)
     assert deployment.tax_collector.address is not None
-    assert isinstance(deployment.flapper, Flapper)
-    assert deployment.flapper.address is not None
+    assert isinstance(deployment.surplus_auction_house, PreSettlementSurplusAuctionHouse)
+    assert deployment.surplus_auction_house.address is not None
     assert isinstance(deployment.debt_auction_house, DebtAuctionHouse)
     assert deployment.debt_auction_house.address is not None
-    assert isinstance(deployment.end, GlobalSettlement)
+    assert isinstance(deployment.global_settlement, GlobalSettlement)
     assert deployment.global_settlement.address is not None
     assert isinstance(deployment.esm, ESM)
     assert deployment.esm.address is not None

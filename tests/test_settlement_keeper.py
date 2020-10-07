@@ -25,394 +25,413 @@ import logging
 
 from web3 import Web3
 
-from src.cage_keeper import CageKeeper
+from src.settlement_keeper import SettlementKeeper
 
-from pymaker import Address
-from pymaker.approval import directly, hope_directly
-from pymaker.auctions import Flapper, Flopper, Flipper
-from pymaker.deployment import DssDeployment
-from pymaker.dss import Collateral, Ilk, Urn
-from pymaker.numeric import Wad, Ray, Rad
-from pymaker.shutdown import ShutdownModule, End
+from pyflex import Address
+from pyflex.approval import directly, approve_safe_modification_directly
+from pyflex.auctions import PreSettlementSurplusAuctionHouse, DebtAuctionHouse
+from pyflex.auctions import EnglishCollateralAuctionHouse, FixedDiscountCollateralAuctionHouse
+from pyflex.deployment import GfDeployment
+from pyflex.gf import Collateral, CollateralType, SAFE
+from pyflex.numeric import Wad, Ray, Rad
+from pyflex.shutdown import ESM, GlobalSettlement
 
-from tests.test_auctions import create_debt, check_active_auctions, max_dart
-from tests.test_dss import mint_mkr, wrap_eth, frob, set_collateral_price
+from tests.test_auctions import create_debt, check_active_auctions, max_delta_debt
+from tests.test_gf import mint_prot, wrap_eth, wrap_modify_safe_collateralization, set_collateral_price, get_collateral_price
 from tests.helpers import time_travel_by
 
 
-def open_vault(mcd: DssDeployment, collateral: Collateral, address: Address, debtMultiplier: int = 1):
-    assert isinstance(mcd, DssDeployment)
+def open_safe(geb: GfDeployment, collateral: Collateral, address: Address, debtMultiplier: int = 1):
+    assert isinstance(geb, GfDeployment)
     assert isinstance(collateral, Collateral)
     assert isinstance(address, Address)
 
     collateral.approve(address)
-    wrap_eth(mcd, address, Wad.from_number(20))
+    wrap_eth(geb, address, Wad.from_number(20))
     assert collateral.adapter.join(address, Wad.from_number(20)).transact(from_address=address)
-    frob(mcd, collateral, address, Wad.from_number(20), Wad.from_number(20 * debtMultiplier))
+    wrap_modify_safe_collateralization(geb, collateral, address, Wad.from_number(20), Wad.from_number(20 * debtMultiplier))
 
-    assert mcd.vat.debt() >= Rad(Wad.from_number(20 * debtMultiplier))
-    assert mcd.vat.dai(address) >= Rad.from_number(20 * debtMultiplier)
-
-
-def wipe_debt(mcd: DssDeployment, collateral: Collateral, address: Address):
-    urn = mcd.vat.urn(collateral.ilk, address)
-    assert Rad(urn.art) >= mcd.vat.dai(address)
-    dink = Ray(mcd.vat.dai(address)) / mcd.vat.ilk(collateral.ilk.name).rate
-    frob(mcd, collateral, address, Wad(0), Wad(dink) * -1) #because there is residual state on the testchain
-    assert mcd.vat.dai(address) <= Rad(Wad(1)) # pesky dust amount in Dai amount
+    assert geb.safe_engine.global_debt() >= Rad(Wad.from_number(20 * debtMultiplier))
+    assert geb.safe_engine.coin_balance(address) >= Rad.from_number(20 * debtMultiplier)
 
 
-def open_underwater_urn(mcd: DssDeployment, collateral: Collateral, address: Address):
-    open_vault(mcd, collateral, address, 100)
-    previous_eth_price = mcd.vat.ilk(collateral.ilk.name).spot * mcd.spotter.mat(collateral.ilk)
+def wipe_debt(geb: GfDeployment, collateral: Collateral, address: Address):
+    safe = geb.safe_engine.safe(collateral.collateral_type, address)
+    assert Rad(safe.generated_debt) >= geb.safe_engine.coin_balance(address)
+    delta_collateral = Ray(geb.safe_engine.coin_balance(address)) / geb.safe_engine.collateral_type(collateral.collateral_type.name).accumulated_rate
+    wrap_modify_safe_collateralization(geb, collateral, address, Wad(0), Wad(delta_collateral) * -1) #because there is residual state on the testchain
+    assert geb.safe_engine.coin_balance(address) <= Rad(Wad(1)) # pesky dust amount in Dai amount
+
+def open_underwater_safe(geb: GfDeployment, collateral: Collateral, address: Address):
+    open_safe(geb, collateral, address, 50)
+    #previous_eth_price = geb.safe_engine.collateral_type(collateral.collateral_type.name).safety_price * geb.oracle_relayer.safety_c_ratio(collateral.collateral_type)
+    previous_eth_price = get_collateral_price(collateral)
     print(f"Previous ETH Price {previous_eth_price} USD")
-    set_collateral_price(mcd, collateral, Wad.from_number(49))
+    #set_collateral_price(geb, collateral, Wad.from_number(49))
+    set_collateral_price(geb, collateral, previous_eth_price / Wad.from_number(5))
 
-    urn = mcd.vat.urn(collateral.ilk, address)
-    ilk = mcd.vat.ilk(collateral.ilk.name)
-    mat = mcd.spotter.mat(ilk)
-    assert (urn.art * ilk.rate) > (urn.ink * ilk.spot * mat)
+    safe = geb.safe_engine.safe(collateral.collateral_type, address)
+    collateral_type = geb.safe_engine.collateral_type(collateral.collateral_type.name)
+    safety_c_ratio = geb.oracle_relayer.safety_c_ratio(collateral_type)
+    assert (safe.generated_debt * collateral_type.accumulated_rate) > (safe.locked_collateral * collateral_type.safety_price * safety_c_ratio)
 
     return previous_eth_price
 
-
-def create_surplus(mcd: DssDeployment, flapper: Flapper, deployment_address: Address):
-    assert isinstance(mcd, DssDeployment)
-    assert isinstance(flapper, Flapper)
+def create_surplus(geb: GfDeployment, surplus_auction_house: PreSettlementSurplusAuctionHouse, deployment_address: Address):
+    assert isinstance(geb, GfDeployment)
+    assert isinstance(surplus_auction_house, PreSettlementSurplusAuctionHouse)
     assert isinstance(deployment_address, Address)
 
-    joy = mcd.vat.dai(mcd.vow.address)
+    surplus = geb.safe_engine.coin_balance(geb.accounting_engine.address)
 
-    if joy < mcd.vow.hump() + mcd.vow.bump():
-        # Create a CDP with surplus
-        print('Creating a CDP with surplus')
-        collateral = mcd.collaterals['ETH-B']
-        assert flapper.kicks() == 0
-        wrap_eth(mcd, deployment_address, Wad.from_number(10))
+    if surplus < geb.accounting_engine.surplus_buffer() + geb.accounting_engine.surplus_auction_amount_to_sell():
+        # Create a SAFE with surplus
+        print('Creating a SAFE with surplus')
+        collateral = geb.collaterals['ETH-B']
+        assert surplus_auction_house.auctions_started() == 0
+        wrap_eth(geb, deployment_address, Wad.from_number(10))
         collateral.approve(deployment_address)
         assert collateral.adapter.join(deployment_address, Wad.from_number(10)).transact(
             from_address=deployment_address)
-        frob(mcd, collateral, deployment_address, dink=Wad.from_number(10), dart=Wad.from_number(1000))
-        assert mcd.jug.drip(collateral.ilk).transact(from_address=deployment_address)
-        joy = mcd.vat.dai(mcd.vow.address)
-        assert joy > mcd.vow.hump() + mcd.vow.bump()
+        wrap_modify_safe_collateralization(geb, collateral, deployment_address, delta_collateral=Wad.from_number(10),
+                                           delta_debt=Wad.from_number(300))
+        assert geb.tax_collector.tax_single(collateral.collateral_type).transact(from_address=deployment_address)
+        surplus = geb.safe_engine.coin_balance(geb.accounting_engine.address)
+        assert surplus > geb.accounting_engine.surplus_buffer() + geb.accounting_engine.surplus_auction_amount_to_sell()
     else:
-        print(f'Surplus of {joy} already exists; skipping CDP creation')
+        print(f'Surplus of {surplus} already exists; skipping SAFE creation')
 
 
-def create_flap_auction(mcd: DssDeployment, deployment_address: Address, our_address: Address):
-    assert isinstance(mcd, DssDeployment)
+def create_surplus_auction(geb: GfDeployment, deployment_address: Address, our_address: Address):
+    assert isinstance(geb, GfDeployment)
     assert isinstance(deployment_address, Address)
     assert isinstance(our_address, Address)
 
-    flapper = mcd.flapper
-    print(f"Before Surplus: {mcd.vat.dai(mcd.vow.address)}")
-    create_surplus(mcd, flapper, deployment_address)
-    print(f"After Surplus: {mcd.vat.dai(mcd.vow.address)}")
+    surplus_auction_house = geb.surplus_auction_house
+    print(f"Before Surplus: {geb.safe_engine.coin_balance(geb.accounting_engine.address)}")
+    create_surplus(geb, surplus_auction_house, deployment_address)
+    print(f"After Surplus: {geb.safe_engine.coin_balance(geb.accounting_engine.address)}")
 
-    # Kick off the flap auction
-    joy = mcd.vat.dai(mcd.vow.address)
-    assert joy > mcd.vat.sin(mcd.vow.address) + mcd.vow.bump() + mcd.vow.hump()
-    assert (mcd.vat.sin(mcd.vow.address) - mcd.vow.sin()) - mcd.vow.ash() == Rad(0)
-    assert mcd.vow.flap().transact()
-    kick = flapper.kicks()
-    assert kick == 1
-    assert len(flapper.active_auctions()) == 1
+    # start surplus auction
+    surplus = geb.safe_engine.coin_balance(geb.accounting_engine.address)
+    assert surplus > geb.safe_engine.debt_balance(geb.accounting_engine.address) + \
+                     geb.accounting_engine.surplus_auction_amount_to_sell() + \
+                     geb.accounting_engine.surplus_buffer()
+    assert (geb.safe_engine.debt_balance(geb.accounting_engine.address) - \
+            geb.accounting_engine.debt_queue()) - geb.accounting_engine.total_on_auction_debt() == Rad(0)
+    assert geb.accounting_engine.auction_surplus().transact()
+    auction_id = surplus_auction_house.auctions_started()
+    assert auction_id == 1
+    assert len(surplus_auction_house.active_auctions()) == 1
+
+    mint_prot(geb.prot, our_address, Wad.from_number(10))
+    surplus_auction_house.approve(geb.prot.address, directly(from_address=our_address))
+    bid_amount = Wad.from_number(0.001)
+    assert geb.prot.balance_of(our_address) > bid_amount
+    assert surplus_auction_house.increase_bid_size(surplus_auction_house.auctions_started(),
+                                                   geb.accounting_engine.surplus_auction_amount_to_sell(),
+                                                   bid_amount).transact(from_address=our_address)
 
 
-    mint_mkr(mcd.mkr, our_address, Wad.from_number(10))
-    flapper.approve(mcd.mkr.address, directly(from_address=our_address))
-    bid = Wad.from_number(0.001)
-    assert mcd.mkr.balance_of(our_address) > bid
-    assert flapper.tend(flapper.kicks(), mcd.vow.bump(), bid).transact(from_address=our_address)
-
-
-def create_flop_auction(mcd: DssDeployment, deployment_address: Address, our_address: Address):
-    assert isinstance(mcd, DssDeployment)
+def create_debt_auction(geb: GfDeployment, deployment_address: Address, our_address: Address):
+    assert isinstance(geb, GfDeployment)
     assert isinstance(deployment_address, Address)
     assert isinstance(our_address, Address)
 
-    flopper = mcd.flopper
-    print(f"Before Debt: {mcd.vat.sin(mcd.vow.address)}")
-    if mcd.vow.woe() <= mcd.vow.sump():
-        create_debt(mcd.web3, mcd, our_address, deployment_address)
-    print(f"After Debt: {mcd.vat.sin(mcd.vow.address)}")
+    debt_auction_house = geb.debt_auction_house
+    print(f"Before Debt: {geb.safe_engine.debt_balance(geb.accounting_engine.address)}")
+    if geb.accounting_engine.unqueued_unauctioned_debt() <= geb.accounting_engine.debt_auction_bid_size():
+        create_debt(geb.web3, geb, our_address, deployment_address, geb.collaterals['ETH-A'])
+    print(f"After Debt: {geb.safe_engine.debt_balance(geb.accounting_engine.address)}")
 
-    # Kick off the flop auction
-    kicks = flopper.kicks()
-    assert kicks == 0
-    assert len(flopper.active_auctions()) == 0
-    assert mcd.vat.dai(mcd.vow.address) == Rad(0)
-    assert mcd.vow.flop().transact()
-    kicks = flopper.kicks()
-    assert kicks == 1
-    assert len(flopper.active_auctions()) == 1
-    check_active_auctions(flopper)
-    current_bid = flopper.bids(kicks)
+    # start debt auction
+    auction_id = debt_auction_house.auctions_started()
+    assert auction_id == 0
+    assert len(debt_auction_house.active_auctions()) == 0
+    assert geb.safe_engine.coin_balance(geb.accounting_engine.address) == Rad(0)
+    assert geb.accounting_engine.auction_debt().transact()
+    auction_id = debt_auction_house.auctions_started()
+    assert auction_id == 1
+    assert len(debt_auction_house.active_auctions()) == 1
+    check_active_auctions(debt_auction_house)
+    current_bid = debt_auction_house.bids(auction_id)
+
+    amount_to_sell = Wad.from_number(0.000005)
+    # current_bid.bid_amount = 0.001
+    # current_bid.amount_to_sell = 0.0001
+    debt_auction_house.approve(geb.safe_engine.address, approval_function=approve_safe_modification_directly(from_address=our_address))
+    assert geb.safe_engine.safe_rights(our_address, debt_auction_house.address)
+
+    collateral = geb.collaterals['ETH-A']
+    wrap_eth(geb, our_address, Wad.from_number(1))
+    collateral.approve(our_address)
+    assert collateral.adapter.join(our_address, Wad.from_number(1)).transact(from_address=our_address)
+    #web3.eth.defaultAccount = our_address.address
+    wrap_modify_safe_collateralization(geb, collateral, our_address, delta_collateral=Wad.from_number(1), delta_debt=Wad.from_number(10))
 
 
-    bid = Wad.from_number(0.000005)
-    flopper.approve(mcd.vat.address, approval_function=hope_directly(from_address=our_address))
-    assert mcd.vat.can(our_address, flopper.address)
-    dent(flopper, kicks, our_address, bid, current_bid.bid)
-    current_bid = flopper.bids(kicks)
-    assert current_bid.guy == our_address
 
 
-def dent(flopper: Flopper, id: int, address: Address, lot: Wad, bid: Rad):
-    assert (isinstance(flopper, Flopper))
+
+    assert geb.safe_engine.coin_balance(our_address) >= current_bid.bid_amount
+    decrease_sold_amount(debt_auction_house, auction_id, our_address, amount_to_sell, current_bid.bid_amount)
+    current_bid = debt_auction_house.bids(auction_id)
+    assert current_bid.high_bidder == our_address
+
+def decrease_sold_amount(debt_auction_house: DebtAuctionHouse, id: int, address: Address, amount_to_sell: Wad, bid_amount: Rad):
+    assert (isinstance(debt_auction_house, DebtAuctionHouse))
     assert (isinstance(id, int))
-    assert (isinstance(lot, Wad))
-    assert (isinstance(bid, Rad))
+    assert (isinstance(amount_to_sell, Wad))
+    assert (isinstance(bid_amount, Rad))
 
-    assert flopper.live() == 1
+    assert debt_auction_house.contract_enabled() == 1
 
-    current_bid = flopper.bids(id)
-    assert current_bid.guy != Address("0x0000000000000000000000000000000000000000")
-    assert current_bid.tic > datetime.now().timestamp() or current_bid.tic == 0
-    assert current_bid.end > datetime.now().timestamp()
+    current_bid = debt_auction_house.bids(id)
+    assert current_bid.high_bidder != Address("0x0000000000000000000000000000000000000000")
+    assert current_bid.bid_expiry > datetime.now().timestamp() or current_bid.bid_expiry == 0
+    assert current_bid.auction_deadline > datetime.now().timestamp()
 
-    assert bid == current_bid.bid
-    assert Wad(0) < lot < current_bid.lot
-    assert flopper.beg() * lot <= current_bid.lot
+    assert bid_amount == current_bid.bid_amount
+    assert Wad(0) < amount_to_sell < current_bid.amount_to_sell
+    assert debt_auction_house.bid_decrease() * amount_to_sell <= current_bid.amount_to_sell
 
-    assert flopper.dent(id, lot, bid).transact(from_address=address)
+    assert debt_auction_house.decrease_sold_amount(id, amount_to_sell, bid_amount).transact(from_address=address)
 
 
-def create_flip_auction(mcd: DssDeployment, deployment_address: Address, our_address: Address):
-    assert isinstance(mcd, DssDeployment)
+def create_collateral_auction(geb: GfDeployment, deployment_address: Address, our_address: Address):
+    assert isinstance(geb, GfDeployment)
     assert isinstance(our_address, Address)
     assert isinstance(deployment_address, Address)
 
-    # Create a CDP
-    collateral = mcd.collaterals['ETH-A']
-    ilk = collateral.ilk
-    wrap_eth(mcd, deployment_address, Wad.from_number(1))
+    # Create a SAFE
+    collateral = geb.collaterals['ETH-A']
+    collateral_type = collateral.collateral_type
+    wrap_eth(geb, deployment_address, Wad.from_number(1))
     collateral.approve(deployment_address)
     assert collateral.adapter.join(deployment_address, Wad.from_number(1)).transact(
         from_address=deployment_address)
-    frob(mcd, collateral, deployment_address, dink=Wad.from_number(1), dart=Wad(0))
-    dart = max_dart(mcd, collateral, deployment_address) - Wad(1)
-    frob(mcd, collateral, deployment_address, dink=Wad(0), dart=dart)
+    wrap_modify_safe_collateralization(geb, collateral, deployment_address, delta_collateral=Wad.from_number(1), delta_debt=Wad(0))
+    delta_debt = max_delta_debt(geb, collateral, deployment_address) - Wad(1)
+    wrap_modify_safe_collateralization(geb, collateral, deployment_address, delta_collateral=Wad(0), delta_debt=delta_debt)
 
-    # Undercollateralize and bite the CDP
-    to_price = Wad(mcd.web3.toInt(collateral.pip.read())) / Wad.from_number(2)
-    set_collateral_price(mcd, collateral, to_price)
-    urn = mcd.vat.urn(collateral.ilk, deployment_address)
-    ilk = mcd.vat.ilk(ilk.name)
-    safe = Ray(urn.art) * mcd.vat.ilk(ilk.name).rate <= Ray(urn.ink) * ilk.spot
+    # Undercollateralize and bite the SAFE
+    to_price = Wad(geb.web3.toInt(collateral.osm.read())) / Wad.from_number(2)
+    set_collateral_price(geb, collateral, to_price)
+    safe = geb.safe_engine.safe(collateral.collateral_type, deployment_address)
+    collateral_type = geb.safe_engine.collateral_type(collateral_type.name)
+    safe = Ray(safe.generated_debt) * geb.safe_engine.collateral_type(collateral_type.name).accumulated_rate <= Ray(safe.locked_collateral) * collateral_type.safety_price
     assert not safe
-    assert mcd.cat.can_bite(collateral.ilk, Urn(deployment_address))
-    assert mcd.cat.bite(collateral.ilk, Urn(deployment_address)).transact()
-    flip_kick = collateral.flipper.kicks()
+    assert geb.liquidation_engine.can_liquidate(collateral.collateral_type, SAFE(deployment_address))
+    assert geb.liquidation_engine.liquidate_safe(collateral.collateral_type, SAFE(deployment_address)).transact()
+    auction_id = collateral.collateral_auction_house.auctions_started()
 
-    # Generate some Dai, bid on the flip auction without covering all the debt
-    wrap_eth(mcd, our_address, Wad.from_number(10))
+    # Generate some system coin, bid on the collateral auction without covering all the debt
+    wrap_eth(geb, our_address, Wad.from_number(10))
     collateral.approve(our_address)
     assert collateral.adapter.join(our_address, Wad.from_number(10)).transact(from_address=our_address)
-    mcd.web3.eth.defaultAccount = our_address.address
-    frob(mcd, collateral, our_address, dink=Wad.from_number(10), dart=Wad.from_number(200))
-    collateral.flipper.approve(mcd.vat.address, approval_function=hope_directly())
-    current_bid = collateral.flipper.bids(flip_kick)
-    urn = mcd.vat.urn(collateral.ilk, our_address)
-    assert Rad(urn.art) > current_bid.tab
-    bid = Rad.from_number(6)
-    tend(collateral.flipper, flip_kick, our_address, current_bid.lot, bid)
+    geb.web3.eth.defaultAccount = our_address.address
+    wrap_modify_safe_collateralization(geb, collateral, our_address, delta_collateral=Wad.from_number(10), delta_debt=Wad.from_number(50))
+    collateral.collateral_auction_house.approve(geb.safe_engine.address, approval_function=approve_safe_modification_directly())
+    current_bid = collateral.collateral_auction_house.bids(auction_id)
+    safe = geb.safe_engine.safe(collateral.collateral_type, our_address)
+    assert Rad(safe.generated_debt) > current_bid.amount_to_raise
+    bid_amount = Rad.from_number(6)
+    increase_bid_size(collateral.collateral_auction_house, auction_id, our_address, current_bid.amount_to_sell, bid_amount)
 
 
-def tend(flipper: Flipper, id: int, address: Address, lot: Wad, bid: Rad):
-        assert (isinstance(flipper, Flipper))
+def increase_bid_size(collateral_auction_house: EnglishCollateralAuctionHouse, id: int, address: Address, amount_to_sell: Wad, bid_amount: Rad):
+        assert (isinstance(collateral_auction_house, EnglishCollateralAuctionHouse))
         assert (isinstance(id, int))
-        assert (isinstance(lot, Wad))
-        assert (isinstance(bid, Rad))
+        assert (isinstance(amount_to_sell, Wad))
+        assert (isinstance(bid_amount, Rad))
 
-        current_bid = flipper.bids(id)
-        assert current_bid.guy != Address("0x0000000000000000000000000000000000000000")
-        assert current_bid.tic > datetime.now().timestamp() or current_bid.tic == 0
-        assert current_bid.end > datetime.now().timestamp()
+        current_bid = collateral_auction_house.bids(id)
+        assert current_bid.high_bidder != Address("0x0000000000000000000000000000000000000000")
+        assert current_bid.bid_expiry > datetime.now().timestamp() or current_bid.bid_expiry == 0
+        assert current_bid.auction_deadline > datetime.now().timestamp()
 
-        assert lot == current_bid.lot
-        assert bid <= current_bid.tab
-        assert bid > current_bid.bid
-        assert (bid >= Rad(flipper.beg()) * current_bid.bid) or (bid == current_bid.tab)
+        assert amount_to_sell == current_bid.amount_to_sell
+        assert bid_amount <= current_bid.amount_to_raise
+        assert bid_amount > current_bid.bid_amount
+        assert (bid_amount >= Rad(collateral_auction_house.bid_increase()) * current_bid.bid_amount) or (bid_amount == current_bid.amount_to_raise)
 
-        assert flipper.tend(id, lot, bid).transact(from_address=address)
-
-
-def prepare_esm(mcd: DssDeployment, our_address: Address):
-    assert mcd.esm is not None
-    assert isinstance(mcd.esm, ShutdownModule)
-    assert isinstance(mcd.esm.address, Address)
-    assert mcd.esm.sum() == Wad(0)
-    assert mcd.esm.min() > Wad(0)
-    assert not mcd.esm.fired()
-
-    assert mcd.mkr.approve(mcd.esm.address).transact()
-
-    # This should have no effect yet succeed regardless
-    assert mcd.esm.join(Wad(0)).transact()
-    assert mcd.esm.sum() == Wad(0)
-    assert mcd.esm.sum_of(our_address) == Wad(0)
+        assert collateral_auction_house.increase_bid_size(id, amount_to_sell, bid_amount).transact(from_address=address)
 
 
-    # Mint and join a min amount to call esm.fire
-    mint_mkr(mcd.mkr, our_address, mcd.esm.min())
-    assert mcd.esm.join(mcd.esm.min()).transact()
-    assert mcd.esm.sum() == mcd.esm.min()
+def prepare_esm(geb: GfDeployment, deployment_address: Address):
+    assert geb.esm is not None
+    assert isinstance(geb.esm, ESM)
+    assert isinstance(geb.esm.address, Address)
+    assert geb.esm.trigger_threshold() > Wad(0)
+    assert not geb.esm.settled()
 
+    assert geb.prot.approve(geb.esm.address).transact(from_address=deployment_address)
 
-def fire_esm(mcd: DssDeployment):
-    assert mcd.end.live()
-    assert mcd.esm.fire().transact()
-    assert mcd.esm.fired()
-    assert not mcd.end.live()
+    # Mint enough prot to call esm.shutdown
+    mint_prot(geb.prot, deployment_address, geb.esm.trigger_threshold())
+    assert geb.prot.balance_of(deployment_address) >= geb.esm.trigger_threshold()
 
+    assert not geb.esm.settled()
+
+def fire_esm(geb: GfDeployment, deployment_address: Address):
+    assert geb.global_settlement.contract_enabled()
+    assert geb.esm.shutdown().transact(from_address=deployment_address)
+    assert geb.esm.settled()
+    assert not geb.global_settlement.contract_enabled()
 
 def print_out(testName: str):
     print("")
     print(f"{testName}")
     print("")
 
-
-pytest.global_urns = []
+pytest.global_safes = []
 pytest.global_auctions = {}
 
-class TestCageKeeper:
+class TestSettlementKeeper:
 
-    def test_check_deployment(self, mcd: DssDeployment, keeper: CageKeeper):
+    def test_check_deployment(self, geb: GfDeployment, keeper: SettlementKeeper):
         print_out("test_check_deployment")
         keeper.check_deployment()
 
-    def test_get_underwater_urns(self, mcd: DssDeployment, keeper: CageKeeper, guy_address: Address, our_address: Address):
-        print_out("test_get_underwater_urns")
+    #@pytest.mark.skip("tmp")
+    def test_get_underwater_safes(self, geb: GfDeployment, keeper: SettlementKeeper, guy_address: Address, our_address: Address):
+        print_out("test_get_underwater_safes")
 
-        previous_eth_price = open_underwater_urn(mcd, mcd.collaterals['ETH-A'], guy_address)
-        open_vault(mcd, mcd.collaterals['ETH-C'], our_address)
+        previous_eth_price = open_underwater_safe(geb, geb.collaterals['ETH-A'], guy_address)
+        open_safe(geb, geb.collaterals['ETH-C'], our_address)
 
-        ilks = keeper.get_ilks()
+        collateral_types = keeper.get_collateral_types()
 
-        urns = keeper.get_underwater_urns(ilks)
-        assert type(urns) is list
-        assert all(isinstance(x, Urn) for x in urns)
-        assert len(urns) == 1
-        assert urns[0].address.address == guy_address.address
+        safes = keeper.get_underwater_safes(collateral_types)
+        assert type(safes) is list
+        assert all(isinstance(x, SAFE) for x in safes)
+        assert len(safes) == 1
+        assert safes[0].address.address == guy_address.address
 
         ## We've multiplied by a small Ray amount to counteract
         ## the residual dust (or lack thereof) in this step that causes
-        ## create_flop_auction fail
-        set_collateral_price(mcd, mcd.collaterals['ETH-A'], Wad(previous_eth_price * Ray.from_number(1.0001)))
+        ## create_debt_auction fail
+        set_collateral_price(geb, geb.collaterals['ETH-A'], Wad(previous_eth_price * Ray.from_number(1.0001)))
 
-        pytest.global_urns = urns
+        pytest.global_safes = safes
 
-    def test_get_ilks(self, mcd: DssDeployment, keeper: CageKeeper):
-        print_out("test_get_ilks")
+    #@pytest.mark.skip("tmp")
+    def test_get_collateral_types(self, geb: GfDeployment, keeper: SettlementKeeper):
+        print_out("test_get_collateral_types")
 
-        ilks = keeper.get_ilks()
-        assert type(ilks) is list
-        assert all(isinstance(x, Ilk) for x in ilks)
-        deploymentIlks = [mcd.vat.ilk(key) for key in mcd.collaterals.keys()]
+        collateral_types = keeper.get_collateral_types()
+        assert type(collateral_types) is list
+        assert all(isinstance(x, CollateralType) for x in collateral_types)
+        deployment_collateral_types = [geb.safe_engine.collateral_type(key) for key in geb.collaterals.keys()]
 
-        empty_deploymentIlks = list(filter(lambda l: mcd.vat.ilk(l.name).art == Wad(0), deploymentIlks))
+        empty_deployment_collateral_types = list(filter(lambda l: geb.safe_engine.collateral_type(l.name).safe_debt == Wad(0), deployment_collateral_types))
 
-        assert all(elem not in empty_deploymentIlks for elem in ilks)
+        assert all(elem not in empty_deployment_collateral_types for elem in collateral_types)
 
-    def test_active_auctions(self, mcd: DssDeployment, keeper: CageKeeper, our_address: Address, other_address: Address, deployment_address: Address):
+    #@pytest.mark.skip("tmp")
+    def test_active_auctions(self, geb: GfDeployment, keeper: SettlementKeeper, our_address: Address, other_address: Address, deployment_address: Address):
         print_out("test_active_auctions")
-        print(f"Sin: {mcd.vat.sin(mcd.vow.address)}")
-        print(f"Dai: {mcd.vat.dai(mcd.vow.address)}")
+        print(f"debt balance: {geb.safe_engine.debt_balance(geb.accounting_engine.address)}")
+        print(f"system coin: {geb.safe_engine.coin_balance(geb.accounting_engine.address)}")
 
-        create_flap_auction(mcd, deployment_address, our_address)
-        create_flop_auction(mcd, deployment_address, other_address)
-        # this flip auction sets the collateral back to a price that makes the guy's vault underwater again.
-        # 49 to make it underwater, and create_flip_auction sets it to 33
-        create_flip_auction(mcd, deployment_address, our_address)
+        create_surplus_auction(geb, deployment_address, our_address)
+        create_debt_auction(geb, deployment_address, other_address)
+
+        # this collateral auction sets the collateral back to a price that makes the guy's vault underwater again.
+        # 49 to make it underwater, and create_collateral_auction sets it to 33
+        create_collateral_auction(geb, deployment_address, our_address)
 
         auctions = keeper.all_active_auctions()
-        assert "flips" in auctions
-        assert "flops" in auctions
-        assert "flaps" in auctions
+        assert "collateral_auctions" in auctions
+        assert "debt_auctions" in auctions
+        assert "surplus_auctions" in auctions
 
         nobody = Address("0x0000000000000000000000000000000000000000")
 
         # All auctions active before cage have been yanked
-        for ilk in auctions["flips"].keys():
-            for auction in auctions["flips"][ilk]:
-                assert len(auctions["flips"][ilk]) == 1
+        for collateral_type in auctions["collateral_auctions"].keys():
+            # pyflex create_debt() doesn't bid on collateral auction.
+            # so one extra auction is preset
+            #assert len(auctions["collateral_auctions"][collateral_type]) == 1
+            for auction in auctions["collateral_auctions"][collateral_type]:
                 assert auction.id > 0
-                assert auction.bid < auction.tab
-                assert auction.guy != nobody
-                assert auction.guy == our_address
+                assert auction.bid_amount < auction.amount_to_raise
+                assert auction.high_bidder != nobody
+                #assert auction.high_bidder == our_address
 
-        assert len(auctions["flaps"]) == 1
-        for auction in auctions["flaps"]:
+        assert len(auctions["surplus_auctions"]) == 1
+        for auction in auctions["surplus_auctions"]:
             assert auction.id > 0
-            assert auction.guy != nobody
-            assert auction.guy == our_address
+            assert auction.high_bidder != nobody
+            assert auction.high_bidder == our_address
 
-        assert len(auctions["flops"]) == 1
-        for auction in auctions["flops"]:
+        assert len(auctions["debt_auctions"]) == 1
+        for auction in auctions["debt_auctions"]:
             assert auction.id > 0
-            assert auction.guy != nobody
-            assert auction.guy == other_address
+            assert auction.high_bidder != nobody
+            assert auction.high_bidder == other_address
 
         pytest.global_auctions = auctions
 
-    def test_check_cage(self, mcd: DssDeployment, keeper: CageKeeper, our_address: Address, other_address: Address):
-        print_out("test_check_cage")
-        keeper.check_cage()
-        assert keeper.cageFacilitated == False
-        assert mcd.end.live() == 1
-        prepare_esm(mcd, our_address)
-        fire_esm(mcd)
+    #@pytest.mark.skip("tmp")
+    def test_check_settlement(self, geb: GfDeployment, keeper: SettlementKeeper, our_address: Address, other_address: Address):
+        print_out("test_check_settlement")
+        keeper.check_settlement()
+        assert keeper.settlement_facilitated == False
+        assert geb.global_settlement.contract_enabled() == 1
+        prepare_esm(geb, our_address)
+        fire_esm(geb, our_address)
         assert keeper.confirmations == 0
         for i in range(0,12):
-            time_travel_by(mcd.web3, 1)
-            keeper.check_cage()
+            time_travel_by(geb.web3, 1)
+            keeper.check_settlement()
         assert keeper.confirmations == 12
 
-        keeper.check_cage() # Facilitate processing period
-        assert keeper.cageFacilitated == True
+        keeper.check_settlement() # Facilitate processing period
+        assert keeper.settlement_facilitated == True
 
-        when = mcd.end.when()
-        wait = mcd.end.wait()
-        whenInUnix = when.replace(tzinfo=timezone.utc).timestamp()
-        blockNumber = mcd.web3.eth.blockNumber
-        now = mcd.web3.eth.getBlock(blockNumber).timestamp
-        thawedCage = whenInUnix + wait
-        assert now >= thawedCage
+        shutdown_time = geb.global_settlement.shutdown_time()
+        shutdown_cooldown = geb.global_settlement.shutdown_cooldown()
+        shutdown_time_in_unix = shutdown_time.replace(tzinfo=timezone.utc).timestamp()
+        blockNumber = geb.web3.eth.blockNumber
+        now = geb.web3.eth.getBlock(blockNumber).timestamp
+        set_outstanding_coin_supply_time = shutdown_time_in_unix + shutdown_cooldown
+        assert now >= set_outstanding_coin_supply_time
 
-        time_travel_by(mcd.web3, 1)
+        time_travel_by(geb.web3, 1)
 
-        keeper.check_cage() # Facilitate cooldown (thawing cage)
+        keeper.check_settlement() # Facilitate cooldown (setting outstanding coin supply)
+        assert keeper.settlement_facilitated == True
 
-    def test_cage_keeper(self, mcd: DssDeployment, keeper: CageKeeper, our_address: Address, other_address: Address):
-        print_out("test_cage_keeper")
-        ilks = keeper.get_ilks()
-        urns = pytest.global_urns
+    #@pytest.mark.skip("tmp")
+    def test_settlement_keeper(self, geb: GfDeployment, keeper: SettlementKeeper, our_address: Address, other_address: Address):
+        print_out("test_settlement_keeper")
+        collateral_types = keeper.get_collateral_types()
+        safes = pytest.global_safes
         auctions = pytest.global_auctions
 
-        for ilk in ilks:
-            # Check if cage(ilk) called on all ilks
-            assert mcd.end.tag(ilk) > Ray(0)
+        for collateral_type in collateral_types:
+            # Check if freeze_collateral_type(collateral_type) called on all collateral_types
+            assert geb.global_settlement.final_coin_per_collateral_price(collateral_type) > Ray(0)
 
-            # Check if flow(ilk) called on all ilks
-            assert mcd.end.fix(ilk) > Ray(0)
+            # Check if flow(collateral_type) called on all collateral_types
+            assert geb.global_settlement.collateral_cash_price(collateral_type) > Ray(0)
 
-        # All underwater urns present before ES have been skimmed
-        for i in urns:
-            urn = mcd.vat.urn(i.ilk, i.address)
-            assert urn.art == Wad(0)
+        # All underwater safes present before ES have been skimmed
+        for i in safes:
+            safe = geb.safe_engine.safe(i.collateral_type, i.address)
+            assert safe.generated_debt == Wad(0)
 
-        # All auctions active before cage have been yanked
-        for ilk in auctions["flips"].keys():
-            for auction in auctions["flips"][ilk]:
-                assert mcd.collaterals[ilk].flipper.bids(auction.id).lot == Wad(0)
+        # All auctions active before settlement have been terminated prematurely
+        for collateral_type in auctions["collateral_auctions"].keys():
+            for auction in auctions["collateral_auctions"][collateral_type]:
+                assert geb.collaterals[collateral_type].collateral_auction_house.bids(auction.id).amount_to_sell == Wad(0)
 
-        for auction in auctions["flaps"]:
-            assert mcd.flapper.bids(auction.id).lot == Rad(0)
+        for auction in auctions["surplus_auctions"]:
+            assert geb.surplus_auction_house.bids(auction.id).amount_to_sell == Rad(0)
 
-        for auction in auctions["flops"]:
-            assert mcd.flopper.bids(auction.id).lot == Wad(0)
+        for auction in auctions["debt_auctions"]:
+            assert geb.debt_auction_house.bids(auction.id).amount_to_sell == Wad(0)
 
-        # Cage has been thawed (thaw() called)
-        assert mcd.end.debt() != Rad(0)
+        # setOutstandingCoinSupply() has been called
+        assert geb.global_settlement.outstanding_coin_supply() != Rad(0)

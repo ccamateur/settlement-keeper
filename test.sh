@@ -2,7 +2,7 @@
 
 CONFIG="testchain-value-english-governance-median-multisig-basic"
 #CONFIG="testchain-value-fixed-discount-governance-median-multisig-basic"
-while getopts :c:f: option
+while getopts :c: option
 do
 case "${option}"
 in
@@ -12,13 +12,12 @@ done
 
 # Pull the docker image
 docker pull reflexer/testchain-pyflex:${CONFIG}
-
 pushd ./lib/pyflex
 # Stop any existing containers
 docker-compose -f config/${CONFIG}.yml down
 
 # Start the docker image and wait for parity to initialize
-docker-compose up -d
+docker-compose -f config/${CONFIG}.yml up -d
 sleep 2
 popd
 
