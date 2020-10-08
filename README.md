@@ -1,5 +1,8 @@
 # settlement-keeper
 
+[![Build Status](https://travis-ci.org/reflexer-labs/settlement-keeper.svg?branch=master)](https://travis-ci.org/reflexer-labs/settlement-keeper)
+[![codecov](https://codecov.io/gh/reflexer-labs/settlement-keeper/branch/master/graph/badge.svg)](https://codecov.io/gh/reflexer-labs/settlement-keeper)
+
 The `settlement-keeper` is used to help facilitate [Emergency Shutdown](https://docs.reflexer.finance/system-contracts/shutdown-module) of the [Generalized Ethereum Bond Protocol](https://github.com/reflexer-labs/geb). Emergency shutdown is an involved, deterministic process, requiring interaction from all user types: SAFE owners, system coin holders, Redemption keepers, PROT governors, and other GEB Stakeholders. A high level overview is as follows:
 1. System Shutdown - The Emergency Security Module [(ESM)](https://github.com/reflexer-labs/esm) calls `GlobalSettlement.shutdownSystem()` function, which freezes the USD price for each collateral type as well as many parts of the system.
 2. Processing Period - Next, SAFE owners interact with GlobalSettlement to settle their SAFE and withdraw excess collateral. Auctions are left to conclude or are terminated prematurely before system coin redemption.

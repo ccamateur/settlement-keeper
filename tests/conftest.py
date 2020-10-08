@@ -23,7 +23,7 @@ from web3 import Web3, HTTPProvider
 
 from pyflex import Address
 from pyflex.auctions import FixedDiscountCollateralAuctionHouse, EnglishCollateralAuctionHouse, DebtAuctionHouse
-from pyflex.auctions import PreSettlementSurplusAuctionHouse, PostSettlementSurplusAuctionHouse
+from pyflex.auctions import PreSettlementSurplusAuctionHouse
 from pyflex.deployment import GfDeployment
 from pyflex.gf import SAFEEngine, AccountingEngine, LiquidationEngine, TaxCollector
 from pyflex.shutdown import ESM, GlobalSettlement
