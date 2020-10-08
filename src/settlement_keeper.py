@@ -210,7 +210,7 @@ class SettlementKeeper:
 
     def facilitate_processing_period(self):
         """ Prematurely terminated all active surplus/debt auctions,
-        freeze all collateral_types, skip all flip auctions, skim all underwater safes  """
+        freeze all collateral_types, fast track all collateral auctions, process all underwater safes  """
 
         self.logger.info('')
         self.logger.info('======== Facilitating Settlement ========')
@@ -225,26 +225,23 @@ class SettlementKeeper:
         # Get all auctions that can be prematurely terminated after shutdown
         auctions = self.all_active_auctions()
 
-        # prematurely terminated all surplus and debt auctions
+        # Prematurely terminate all surplus and debt auctions
         self.terminate_auctions_prematurely(auctions["surplus_auctions"], auctions["debt_auctions"])
 
         # Freeze all collateral_types
         for collateral_type in collateral_types:
             self.geb.global_settlement.freeze_collateral_type(collateral_type).transact(gas_price=self.gas_price)
 
-        # fast track all collateral auctions
+        # Fast track all collateral auctions
         for key in auctions["collateral_auctions"].keys():
             collateral_type = self.geb.safe_engine.collateral_type(key)
             for bid in auctions["collateral_auctions"][key]:
                 self.geb.global_settlement.fast_track_auction(collateral_type,bid.id).transact(gas_price=self.gas_price)
 
-        #get all underwater safes
         safes = self.get_underwater_safes(collateral_types)
 
-        print(f"processing {len(safes)} underwater safes")
-        #process all underwater safes
+        # Process all underwater safes
         for i in safes:
-            print(f"processing safe {i}")
             self.geb.global_settlement.process_safe(i.collateral_type, i.address).transact(gas_price=self.gas_price)
 
 
@@ -257,10 +254,9 @@ class SettlementKeeper:
 
         collateral_types = self.get_collateral_types()
 
-        # check if system coin is in AccountingEngine and annialate it with Heal()
+        # check if system coin is in AccountingEngine and annihilate it with settleDebt()
         system_coin = self.geb.safe_engine.coin_balance(self.geb.accounting_engine.address)
         if system_coin > Rad(0):
-            #accounting_engine.transfer_post_settlement_surplus()
             self.geb.accounting_engine.settle_debt(system_coin).transact(gas_price=self.gas_price)
 
         # Fix outstanding supply of System coin

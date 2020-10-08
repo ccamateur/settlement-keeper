@@ -348,7 +348,7 @@ class TestSettlementKeeper:
 
         nobody = Address("0x0000000000000000000000000000000000000000")
 
-        # All auctions active before cage have been yanked
+        # All auctions active before terminations
         for collateral_type in auctions["collateral_auctions"].keys():
             # pyflex create_debt() doesn't bid on collateral auction.
             # so one extra auction is preset
