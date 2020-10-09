@@ -8,10 +8,10 @@ RUN groupadd -r keeper && useradd -d /home/keeper -m --no-log-init -r -g keeper 
 WORKDIR /opt/keeper
 
 RUN git clone https://github.com/reflexer-labs/settlement-keeper.git && \
-    cd settlementt-keeper && \
+    cd settlement-keeper && \
     git submodule update --init --recursive && \
     pip3 install virtualenv && \
     ./install.sh
 
-WORKDIR /opt/keeper/settlementt-keeper
+WORKDIR /opt/keeper/settlement-keeper
 CMD ["./run-settlement-keeper.sh"]
