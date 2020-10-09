@@ -351,14 +351,17 @@ class TestSettlementKeeper:
 
         # All auctions active before terminations
         for collateral_type in auctions["collateral_auctions"].keys():
-            # pyflex create_debt() doesn't bid on collateral auction.
-            # so one extra auction is preset
+            # pyflex create_debt() doesn't bid/settle on collateral auction.
+            # so one extra auction is present
             #assert len(auctions["collateral_auctions"][collateral_type]) == 1
             for auction in auctions["collateral_auctions"][collateral_type]:
-                assert auction.id > 0
-                assert auction.bid_amount < auction.amount_to_raise
-                assert auction.high_bidder != nobody
-                #assert auction.high_bidder == our_address
+                if isinstance(geb.collaterals[collateral_type].collateral_auction_house, EnglishCollateralAuctionHouse):
+                    assert auction.id > 0
+                    assert auction.bid_amount < auction.amount_to_raise
+                    assert auction.high_bidder != nobody
+                    #assert auction.high_bidder == our_address
+                elif isinstance(geb.collaterals[collateral_type].collateral_auction_house, FixedDiscountCollateralAuctionHouse):
+                    assert auction.amount_to_sell != Wad(0) and auction.amount_to_raise != Rad(0)
 
         assert len(auctions["surplus_auctions"]) == 1
         for auction in auctions["surplus_auctions"]:
