@@ -404,8 +404,6 @@ class TestSettlementKeeper:
         assert keeper.settlement_facilitated == True
 
     def test_settlement_keeper(self, geb: GfDeployment, keeper: SettlementKeeper, our_address: Address, other_address: Address):
-        #if not isinstance(geb.collaterals['ETH-A'].collateral_auction_house, EnglishCollateralAuctionHouse):
-        #    return
         print_out("test_settlement_keeper")
         collateral_types = keeper.get_collateral_types()
         safes = pytest.global_safes
