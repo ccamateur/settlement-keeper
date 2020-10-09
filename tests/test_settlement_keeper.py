@@ -236,7 +236,11 @@ def create_collateral_auction(geb: GfDeployment, deployment_address: Address, ou
     safe = geb.safe_engine.safe(collateral.collateral_type, our_address)
     assert Rad(safe.generated_debt) > current_bid.amount_to_raise
     bid_amount = Rad.from_number(6)
-    increase_bid_size(collateral.collateral_auction_house, auction_id, our_address, current_bid.amount_to_sell, bid_amount)
+    if isinstance(collateral.collateral_auction_house, EnglishCollateralAuctionHouse):
+        increase_bid_size(collateral.collateral_auction_house, auction_id, our_address, current_bid.amount_to_sell, bid_amount)
+    elif isinstance(collateral.collateral_auction_house, FixedDiscountCollateralAuctionHouse):
+        assert collateral.collateral_auction_house.get_collateral_bought(auction_id, Wad(bid_amount)).transact(from_address=our_address)
+        assert collateral.collateral_auction_house.buy_collateral(auction_id, Wad(bid_amount)).transact(from_address=our_address)
 
 
 def increase_bid_size(collateral_auction_house: EnglishCollateralAuctionHouse, id: int, address: Address, amount_to_sell: Wad, bid_amount: Rad):
@@ -293,7 +297,6 @@ class TestSettlementKeeper:
         print_out("test_check_deployment")
         keeper.check_deployment()
 
-    #@pytest.mark.skip("tmp")
     def test_get_underwater_safes(self, geb: GfDeployment, keeper: SettlementKeeper, guy_address: Address, our_address: Address):
         print_out("test_get_underwater_safes")
 
@@ -315,7 +318,6 @@ class TestSettlementKeeper:
 
         pytest.global_safes = safes
 
-    #@pytest.mark.skip("tmp")
     def test_get_collateral_types(self, geb: GfDeployment, keeper: SettlementKeeper):
         print_out("test_get_collateral_types")
 
@@ -328,7 +330,6 @@ class TestSettlementKeeper:
 
         assert all(elem not in empty_deployment_collateral_types for elem in collateral_types)
 
-    #@pytest.mark.skip("tmp")
     def test_active_auctions(self, geb: GfDeployment, keeper: SettlementKeeper, our_address: Address, other_address: Address, deployment_address: Address):
         print_out("test_active_auctions")
         print(f"debt balance: {geb.safe_engine.debt_balance(geb.accounting_engine.address)}")
@@ -350,14 +351,17 @@ class TestSettlementKeeper:
 
         # All auctions active before terminations
         for collateral_type in auctions["collateral_auctions"].keys():
-            # pyflex create_debt() doesn't bid on collateral auction.
-            # so one extra auction is preset
+            # pyflex create_debt() doesn't bid/settle on collateral auction.
+            # so one extra auction is present
             #assert len(auctions["collateral_auctions"][collateral_type]) == 1
             for auction in auctions["collateral_auctions"][collateral_type]:
-                assert auction.id > 0
-                assert auction.bid_amount < auction.amount_to_raise
-                assert auction.high_bidder != nobody
-                #assert auction.high_bidder == our_address
+                if isinstance(geb.collaterals[collateral_type].collateral_auction_house, EnglishCollateralAuctionHouse):
+                    assert auction.id > 0
+                    assert auction.bid_amount < auction.amount_to_raise
+                    assert auction.high_bidder != nobody
+                    #assert auction.high_bidder == our_address
+                elif isinstance(geb.collaterals[collateral_type].collateral_auction_house, FixedDiscountCollateralAuctionHouse):
+                    assert auction.amount_to_sell != Wad(0) and auction.amount_to_raise != Rad(0)
 
         assert len(auctions["surplus_auctions"]) == 1
         for auction in auctions["surplus_auctions"]:
@@ -373,7 +377,6 @@ class TestSettlementKeeper:
 
         pytest.global_auctions = auctions
 
-    #@pytest.mark.skip("tmp")
     def test_check_settlement(self, geb: GfDeployment, keeper: SettlementKeeper, our_address: Address, other_address: Address):
         print_out("test_check_settlement")
         keeper.check_settlement()
@@ -403,7 +406,6 @@ class TestSettlementKeeper:
         keeper.check_settlement() # Facilitate cooldown (setting outstanding coin supply)
         assert keeper.settlement_facilitated == True
 
-    #@pytest.mark.skip("tmp")
     def test_settlement_keeper(self, geb: GfDeployment, keeper: SettlementKeeper, our_address: Address, other_address: Address):
         print_out("test_settlement_keeper")
         collateral_types = keeper.get_collateral_types()
@@ -414,10 +416,10 @@ class TestSettlementKeeper:
             # Check if freeze_collateral_type(collateral_type) called on all collateral_types
             assert geb.global_settlement.final_coin_per_collateral_price(collateral_type) > Ray(0)
 
-            # Check if flow(collateral_type) called on all collateral_types
+            # Check if calculate_cash_price(collateral_type) called on all collateral_types
             assert geb.global_settlement.collateral_cash_price(collateral_type) > Ray(0)
 
-        # All underwater safes present before ES have been skimmed
+        # All underwater safes present before ES have been processed
         for i in safes:
             safe = geb.safe_engine.safe(i.collateral_type, i.address)
             assert safe.generated_debt == Wad(0)

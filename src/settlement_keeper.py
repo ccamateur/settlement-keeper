@@ -334,26 +334,33 @@ class SettlementKeeper:
 
     def settlement_active_auctions(self, parentObj) -> List:
         """ Returns auctions that meet the requiremenets to be called by
-        GlobalSettlement.fastTrackAuction, Flap.yank, and DebtAuctionHouse.terminateAuctionPrematurely """
+        GlobalSettlement.fastTrackAuction, SurplusAuctionHouse.terminateAuctionPrematurely and 
+        DebtAuctionHouse.terminateAuctionPrematurely
+        """
         active_auctions = []
         auction_count = parentObj.auctions_started()
 
-        # collateral auctions
+        # english collateral auction
         if isinstance(parentObj, EnglishCollateralAuctionHouse):
-            for index in range(1, auction_count + 1):
+            for index in range(auction_count + 1):
                 bid = parentObj._bids(index)
                 if bid.high_bidder != Address("0x0000000000000000000000000000000000000000"):
                     if bid.bid_amount < bid.amount_to_raise:
                         active_auctions.append(bid)
-                index += 1
+
+        # fixed discount collateral auction
+        elif isinstance(parentObj, FixedDiscountCollateralAuctionHouse):
+            for index in range(auction_count + 1):
+                bid = parentObj._bids(index)
+                if bid.amount_to_sell != Wad(0) and bid.amount_to_raise != Rad(0):
+                    active_auctions.append(bid)
 
         # surplus and debt auctions
         else:
-            for index in range(1, auction_count + 1):
+            for index in range(auction_count + 1):
                 bid = parentObj._bids(index)
                 if bid.high_bidder != Address("0x0000000000000000000000000000000000000000"):
                     active_auctions.append(bid)
-                index += 1
 
         return active_auctions
 

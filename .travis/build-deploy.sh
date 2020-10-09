@@ -15,25 +15,27 @@ REGION=$2
 
 if [ "$ENVIRONMENT" == "prod" ]; then
   TAG=latest
+elif [ "$ENVIRONMENT" == "test" ]; then
+  TAG=test
 else
    message UNKNOWN ENVIRONMENT
 fi
 
 if [ -z "$ENVIRONMENT" ]; then
-  echo 'You must specifiy an envionrment (bash build-deploy.sh <ENVIRONMENT>).'
+  echo 'You must specifiy an environment (bash build-deploy.sh <ENVIRONMENT>).'
   echo 'Allowed values are "staging" or "prod"'
   exit 1
 fi
 
 # build image
 message BUILDING IMAGE
-docker build -t "$TRAVIS_REPO_SLUG:$TAG" .
+docker build -t "reflexer/settlement-keeper:${TAG}" .
 
 # docker login
 echo "$DOCKER_PASSWORD" | docker login --username "$DOCKER_USER" --password-stdin
 
 # docker push
-docker push "$TRAVIS_REPO_SLUG:$TAG"
+docker push "reflexer/settlement-keeper:${TAG}"
 
 # service deploy
 if [ "$ENVIRONMENT" == "prod" ]; then
