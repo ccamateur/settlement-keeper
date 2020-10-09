@@ -338,11 +338,20 @@ class SettlementKeeper:
         active_auctions = []
         auction_count = parentObj.auctions_started()
 
-        # collateral auctions
+        # english collateral auction
         if isinstance(parentObj, EnglishCollateralAuctionHouse):
             for index in range(1, auction_count + 1):
                 bid = parentObj._bids(index)
                 if bid.high_bidder != Address("0x0000000000000000000000000000000000000000"):
+                    if bid.bid_amount < bid.amount_to_raise:
+                        active_auctions.append(bid)
+                index += 1
+
+        # fixed discount collateral auction
+        elif isinstance(parentObj, FixedDiscountCollateralAuctionHouse):
+            for index in range(1, auction_count + 1):
+                bid = parentObj._bids(index)
+                if bid.amount_to_sell == Wad(0) and bid.amount_to_raise == Rad(0):
                     if bid.bid_amount < bid.amount_to_raise:
                         active_auctions.append(bid)
                 index += 1
