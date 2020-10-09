@@ -334,7 +334,9 @@ class SettlementKeeper:
 
     def settlement_active_auctions(self, parentObj) -> List:
         """ Returns auctions that meet the requiremenets to be called by
-        GlobalSettlement.fastTrackAuction, Flap.yank, and DebtAuctionHouse.terminateAuctionPrematurely """
+        GlobalSettlement.fastTrackAuction, SurplusAuctionHouse.terminateAuctionPrematurely and 
+        DebtAuctionHouse.terminateAuctionPrematurely
+        """
         active_auctions = []
         auction_count = parentObj.auctions_started()
 
