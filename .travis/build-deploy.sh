@@ -38,10 +38,14 @@ docker push "$TRAVIS_REPO_SLUG:$TAG"
 # service deploy
 if [ "$ENVIRONMENT" == "prod" ]; then
   message DEPLOYING MAINNET
-  aws ecs update-service --cluster cage-keeper-mainnet-cluster --service cage-keeper-mainnet-service --force-new-deployment --endpoint https://ecs.$REGION.amazonaws.com --region $REGION
+  aws ecs update-service --cluster settlement-keeper-mainnet-cluster --service settlement-keeper-mainnet-service --force-new-deployment --endpoint https://ecs.$REGION.amazonaws.com --region $REGION
 
   message DEPLOYING KOVAN
-  aws ecs update-service --cluster cage-keeper-kovan-cluster --service cage-keeper-kovan-service --force-new-deployment --endpoint https://ecs.$REGION.amazonaws.com --region $REGION
+  aws ecs update-service --cluster settlement-keeper-kovan-cluster --service settlement-keeper-kovan-service --force-new-deployment --endpoint https://ecs.$REGION.amazonaws.com --region $REGION
+
+elif [ "$ENVIRONMENT" == "test" ]; then
+  message DEPLOYING TEST
+  aws ecs update-service --cluster settlement-keeper-test-cluster --service settlement-keeper-test-service --force-new-deployment --endpoint https://ecs.$REGION.amazonaws.com --region $REGION
 
 else
    message UNKNOWN ENVIRONMENT
