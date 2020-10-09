@@ -21,7 +21,7 @@ after_success:
 - codecov
 deploy:
 - provider: script
-  script: bash ./.travis/build-deploy.sh prod us-east-1
+  script: bash ./.travis/build-deploy.sh test us-east-2
   on:
     branch: master
 notifications:

@@ -47,7 +47,6 @@ elif [ "$ENVIRONMENT" == "test" ]; then
   message DEPLOYING TEST
   aws ecs update-service --cluster settlement-keeper-test-cluster --service settlement-keeper-test-service --force-new-deployment --endpoint https://ecs.$REGION.amazonaws.com --region $REGION
 
-
 else
    message UNKNOWN ENVIRONMENT
 fi
