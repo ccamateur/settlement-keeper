@@ -77,11 +77,11 @@ class SettlementKeeper:
         parser.add_argument("--safe-engine-deployment-block", type=int, required=False, default=0,
                             help=" Block that the SAFEEngine from gf-deployment-file was deployed at (e.g. 8836668")
 
-        parser.add_argument("--vulcanize-endpoint", type=str,
+        parser.add_argument("--vulcanize-endpoint", type=str, required=False,
                             help="When specified, frob history will be queried from a VulcanizeDB lite node, "
                                  "reducing load on the Ethereum node for Vault query")
 
-        parser.add_argument("--vulcanize-key", type=str,
+        parser.add_argument("--vulcanize-key", type=str,required=False,
                             help="API key for the Vulcanize endpoint")
 
         parser.add_argument("--max-errors", type=int, default=100,
