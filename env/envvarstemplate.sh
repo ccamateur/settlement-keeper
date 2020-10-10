@@ -19,4 +19,4 @@ VULCANIZE_URL=
 ETH_GASSTATION_API_KEY=
 
 # For ease of use, do not change the location of ETH account keys, note that account files should always be placed in the secrets directory of the cage-keeper, and files named as indicated.
-ETH_ACCOUNT_KEY=key_file=/opt/keeper/cage-keeper/secrets/keystore.json,pass_file=/opt/keeper/cage-keeper/secrets/password.txt
+ETH_ACCOUNT_KEY=key_file=/opt/keeper/settlement-keeper/secrets/keystore.json,pass_file=/opt/keeper/settlement-keeper/secrets/password.txt
