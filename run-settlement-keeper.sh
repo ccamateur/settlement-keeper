@@ -40,6 +40,4 @@ exec $dir/bin/settlement-keeper \
   --network "${BLOCKCHAIN_NETWORK}" \
   --eth-from "${ETH_FROM_ADDRESS}" \
   --eth-key "${ETH_ACCOUNT_KEY}" \
-  --vulcanize-endpoint "${VULCANIZE_URL}" \
-  --vulcanize-key "${VULCANIZE_KEY}" \
   --ethgasstation-api-key "${ETH_GASSTATION_API_KEY}"

@@ -5,13 +5,13 @@ RUN groupadd -r keeper && useradd -d /home/keeper -m --no-log-init -r -g keeper 
     apt-get -y install jq bc && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /opt/keeper
+COPY . /opt/keeper/settlement-keeper/
 
-RUN git clone https://github.com/reflexer-labs/settlement-keeper.git && \
-    cd settlement-keeper && \
+RUN cd /opt/keeper/settlement-keeper && \
     git submodule update --init --recursive && \
     pip3 install virtualenv && \
     ./install.sh
 
 WORKDIR /opt/keeper/settlement-keeper
+
 CMD ["./run-settlement-keeper.sh"]

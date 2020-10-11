@@ -77,11 +77,11 @@ class SettlementKeeper:
         parser.add_argument("--safe-engine-deployment-block", type=int, required=False, default=0,
                             help=" Block that the SAFEEngine from gf-deployment-file was deployed at (e.g. 8836668")
 
-        parser.add_argument("--vulcanize-endpoint", type=str,
+        parser.add_argument("--vulcanize-endpoint", type=str, required=False,
                             help="When specified, frob history will be queried from a VulcanizeDB lite node, "
                                  "reducing load on the Ethereum node for Vault query")
 
-        parser.add_argument("--vulcanize-key", type=str,
+        parser.add_argument("--vulcanize-key", type=str, required=False,
                             help="API key for the Vulcanize endpoint")
 
         parser.add_argument("--max-errors", type=int, default=100,
@@ -101,8 +101,9 @@ class SettlementKeeper:
         parser.set_defaults(settlement_facilitated=False)
         self.arguments = parser.parse_args(args)
 
-        self.web3 = kwargs['web3'] if 'web3' in kwargs else Web3(HTTPProvider(endpoint_uri=f"https://{self.arguments.rpc_host}:{self.arguments.rpc_port}",
-                                                                              request_kwargs={"timeout": self.arguments.rpc_timeout}))
+        self.web3 = kwargs['web3'] if 'web3' in kwargs else \
+                Web3(HTTPProvider(endpoint_uri=f"http://{self.arguments.rpc_host}:{self.arguments.rpc_port}",
+                                  request_kwargs={"timeout": self.arguments.rpc_timeout}))
         self.web3.eth.defaultAccount = self.arguments.eth_from
         register_keys(self.web3, self.arguments.eth_key)
         self.our_address = Address(self.arguments.eth_from)
@@ -171,7 +172,7 @@ class SettlementKeeper:
     def check_settlement(self):
         """ After live is 0 for 12 block confirmations, facilitate the processing period, then set_outstanding_coin_supply """
         blockNumber = self.web3.eth.blockNumber
-        self.logger.info(f'Checking settlment on block {blockNumber}')
+        self.logger.info(f'Checking settlement on block {blockNumber}')
 
         contract_enabled = self.geb.global_settlement.contract_enabled()
 
@@ -218,9 +219,6 @@ class SettlementKeeper:
 
         # check collateral_types
         collateral_types = self.get_collateral_types()
-        print("Collateral_types")
-        for x in collateral_types:
-            print(x)
 
         # Get all auctions that can be prematurely terminated after shutdown
         auctions = self.all_active_auctions()
@@ -243,7 +241,6 @@ class SettlementKeeper:
         # Process all underwater safes
         for i in safes:
             self.geb.global_settlement.process_safe(i.collateral_type, i.address).transact(gas_price=self.gas_price)
-
 
     def set_outstanding_coin_supply(self):
         """ Once GlobalSettlement.shutdownCooldown is reached, annihilate any lingering system coin in the Accounting Engine,
