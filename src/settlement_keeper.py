@@ -90,9 +90,9 @@ class SettlementKeeper:
         parser.add_argument("--debug", dest='debug', action='store_true',
                             help="Enable debug output")
 
-        parser.add_argument("--ethgasstation-api-key", type=str, default=None, help="ethgasstation API key")
+        parser.add_argument("--ethgasstation-api-key", type=str, default=None, required=False, help="ethgasstation API key")
 
-        parser.add_argument("--gas-initial-multiplier", type=str, default=1.0, help="ethgasstation API key")
+        parser.add_argument("--gas-initial-multiplier", type=str, default=1.0, help="gas strategy tuning")
         parser.add_argument("--gas-reactive-multiplier", type=str, default=2.25, help="gas strategy tuning")
         parser.add_argument("--gas-maximum", type=str, default=5000, help="gas strategy tuning")
 
@@ -194,8 +194,9 @@ class SettlementKeeper:
             elif (now >= set_outstanding_coin_supply_time):
                 self.set_outstanding_coin_supply()
 
-                if not (self.arguments.network == 'testnet'):
-                    self.lifecycle.terminate()
+                self.lifecycle.terminate()
+                #if not (self.arguments.network == 'testnet'):
+                #    self.lifecycle.terminate()
 
             else:
                 when_set_outstanding_coin_supply_time = datetime.utcfromtimestamp(set_outstanding_coin_supply_time)

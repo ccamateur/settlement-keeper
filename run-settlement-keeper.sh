@@ -40,4 +40,5 @@ exec $dir/bin/settlement-keeper \
   --network "${BLOCKCHAIN_NETWORK}" \
   --eth-from "${ETH_FROM_ADDRESS}" \
   --eth-key "${ETH_ACCOUNT_KEY}" \
-  --ethgasstation-api-key "${ETH_GASSTATION_API_KEY}"
+  --safe-engine-deployment-block "${DEPLOYMENT_BLOCK}" \
+#  --ethgasstation-api-key "${ETH_GASSTATION_API_KEY}"
