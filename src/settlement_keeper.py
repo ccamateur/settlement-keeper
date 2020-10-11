@@ -81,7 +81,7 @@ class SettlementKeeper:
                             help="When specified, frob history will be queried from a VulcanizeDB lite node, "
                                  "reducing load on the Ethereum node for Vault query")
 
-        parser.add_argument("--vulcanize-key", type=str, required=False,
+        parser.add_argument("--vulcanize-key", type=str,required=False,
                             help="API key for the Vulcanize endpoint")
 
         parser.add_argument("--max-errors", type=int, default=100,
