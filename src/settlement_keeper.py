@@ -194,9 +194,8 @@ class SettlementKeeper:
             elif (now >= set_outstanding_coin_supply_time):
                 self.set_outstanding_coin_supply()
 
-                self.lifecycle.terminate()
-                #if not (self.arguments.network == 'testnet'):
-                #    self.lifecycle.terminate()
+                if not (self.arguments.network == 'testnet'):
+                    self.lifecycle.terminate()
 
             else:
                 when_set_outstanding_coin_supply_time = datetime.utcfromtimestamp(set_outstanding_coin_supply_time)
