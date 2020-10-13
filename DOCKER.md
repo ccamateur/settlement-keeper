@@ -31,9 +31,6 @@ BLOCKCHAIN_NETWORK=
 # Account used to pay for gas
 ETH_FROM_ADDRESS=
 
-# URL of Vulcanize instance to use
-VULCANIZE_URL=
-
 # ETH Gas Station API key
 ETH_GASSTATION_API_KEY=
 
