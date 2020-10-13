@@ -3,12 +3,12 @@
 [![Build Status](https://travis-ci.org/reflexer-labs/settlement-keeper.svg?branch=master)](https://travis-ci.org/reflexer-labs/settlement-keeper)
 [![codecov](https://codecov.io/gh/reflexer-labs/settlement-keeper/branch/master/graph/badge.svg)](https://codecov.io/gh/reflexer-labs/settlement-keeper)
 
-The `settlement-keeper` is used to help facilitate [Emergency Shutdown](https://docs.reflexer.finance/system-contracts/shutdown-module) of the [Generalized Ethereum Bond Protocol](https://github.com/reflexer-labs/geb). Emergency shutdown is an involved, deterministic process, requiring interaction from all user types: SAFE owners, system coin holders, Redemption keepers, PROT governors, and other GEB Stakeholders. A high level overview is as follows:
-1. System Shutdown - The Emergency Security Module [(ESM)](https://github.com/reflexer-labs/esm) calls `GlobalSettlement.shutdownSystem()` function, which freezes the USD price for each collateral type as well as many parts of the system.
-2. Processing Period - Next, SAFE owners interact with GlobalSettlement to settle their SAFE and withdraw excess collateral. Auctions are left to conclude or are terminated prematurely before system coin redemption.
-3. System Coin Redemption  - After the processing period duration `GlobalSettlement.shutdownCooldown` has elapsed, SAFE settlement and all system coin generating processes (auctions) are assumed to have concluded. At this point, system coin holders can begin to claim a proportional amount of each collateral type at a fixed rate.
+The `settlement-keeper` is used to help facilitate [Emergency Shutdown](https://docs.reflexer.finance/system-contracts/shutdown-module) of the [GEB Protocol](https://github.com/reflexer-labs/geb). Emergency shutdown is an involved, deterministic process, requiring interaction from all user types: SAFE owners, system coin holders, keepers, protocol token governors, and other GEB Stakeholders. A high level overview is as follows:
+1. System Shutdown - The Emergency Security Module [(ESM)](https://github.com/reflexer-labs/esm) calls `GlobalSettlement.shutdownSystem()` function, which freezes the  price for each collateral type as well as many parts of the system.
+2. Processing Period - Next, SAFE owners interact with GlobalSettlement to settle their SAFEs and withdraw excess collateral. Auctions are left to conclude or are terminated prematurely before system coin redemption.
+3. System Coin Redemption - After the processing period duration `GlobalSettlement.shutdownCooldown` has elapsed, SAFE settlement and all system coin generating processes (auctions) are assumed to have concluded. At this point, system coin holders can begin to claim a proportional amount of each collateral type at a fixed rate.
 
-To prevent a race-condition for system coin holders during Step 3, it's imperative that any SAFES having a collateralization ratio of less than 100% at Step 1 must be processed during Step 2. The owner of an underwater SAFE would not receive excess collateral, so they lack an incentive to `processSAFE` their position in the `GlobalSettlement` contract. Thus, it is the responsibility of a GEB Stakeholder (PROT holders, large system coin holders, etc) to ensure the system facilitates a system coin redemption phase without a time variable. The `settlement-keeper` is a tool to help stakeholders carry out this responsibility.
+To prevent a race-condition for system coin holders during Step 3, it's imperative that any SAFEs having a collateralization ratio of less than 100% at Step 1 must be processed during Step 2. The owner of an underwater SAFE would not receive excess collateral, so they lack an incentive to `processSAFE` using the `GlobalSettlement` contract. Thus, it is the responsibility of a GEB Stakeholder (protocol token holders, large system coin holders, etc) to ensure that the system facilitates a timely system coin redemption phase. The `settlement-keeper` is a tool to help stakeholders carry out this responsibility.
 
 ### Review
 The following section assumes familiarity with Emergency Shutdown. Good places to start is the Shutdown Module in the [GEB Docs](https://docs.reflexer.finance/system-contracts/shutdown-module). Functions mentioned are from the implementation contained by the `GlobalSettlement` contract, which is [located here](https://github.com/reflexer-labs/geb/blob/master/src/GlobalSettlement.sol).
@@ -17,10 +17,9 @@ The following section assumes familiarity with Emergency Shutdown. Good places t
 
 `settlement-keeper` directly interacts with the `GlobalSettlement`, `DebtAuctionHouse` and `PreSettlementSurplusAuctionHouse` contracts.
 
-The central goal of the `settlement-keeper` is to process all under-collateralized `SAFES`. This accounting step is performed within `GlobalSettlement.processSAFE()`, and since it is surrounded by other required/important steps in the Emergency Shutdown, a first iteration of this keeper will help to call most of the other public function calls within the `GlobalSettlement` contract.
+The central goal of the `settlement-keeper` is to process all under-collateralized `SAFEs`. This accounting step is performed within `GlobalSettlement.processSAFE()`, and since it is surrounded by other required/important steps in the Emergency Shutdown, a first iteration of this keeper will help to call most of the other public functions in the `GlobalSettlement` contract.
 
-The keeper checks if the system has been shutdown before attempting to `processSAFE` all underwater SAFEs and `fastTrackAuction` all collateral auctions. After the processing period has been facilitated and the `GlobalSettlement.shutdownCooldown` waittime has been reached, it will transition the system into the system coin redemption phase of Emergency Shutdown by calling `GlobalSettlement.setOutstandingCoinSupply()` and `GlobalSettlement.calculateCashPrice()`. This first iteration of this keeper is naive, as it assumes it's the only keeper and attempts to account for all SAFEs, collateral types, and auctions. Because of this, it's important that the keeper's address has enough ETH to cover the gas costs involved with sending numerous transactions. Any transaction that attempts to call a function that's already been invoked by another Keeper/user would simply fail.
-
+The keeper checks if the system has been shutdown before attempting to `processSAFE` all underwater SAFEs and `fastTrackAuction` all collateral auctions. After the processing period has been facilitated and the `GlobalSettlement.shutdownCooldown` wait time has been reached, it will transition the system into the redemption phase of Emergency Shutdown by calling `GlobalSettlement.setOutstandingCoinSupply()` and `GlobalSettlement.calculateCashPrice()`. This first iteration of this keeper is naive, as it assumes it's the only keeper and attempts to account for all SAFEs, collateral types, and auctions. Because of this, it's important that the keeper's address has enough ETH to cover the gas costs involved with sending numerous transactions. Any transaction that attempts to call a function that's already been invoked by another Keeper/user would simply fail.
 
 ## Operation
 
@@ -28,21 +27,21 @@ Once the keys to an ethereum address are supplied at startup, the keeper works o
 
 After the `settlement-keeper` facilitates the processing period, it can be turned off until `GlobalSettlement.shutdownCooldown` is nearly reached. Then, at that point, the operator would pass in the `--previous-settlement` argument during keeper start in order to bypass the feature that supports the processing period. Continuous operation removes the need for this flag.
 
-The keeper's ethereum address should have enough ETH to cover gas costs and is a function of the protocol's state at the time of shutdown (i.e. more SAFEs to `processSAFE` means more required ETH to cover gas costs). The following equation approximates how much ETH is required:
+The keeper's ethereum address should have enough ETH to cover gas costs and is a function of the protocol's state at the time of shutdown (i.e. more SAFEs to be called with `processSAFE` means more required ETH to cover gas costs). The following equation approximates how much ETH is required:
 ```
-min_ETH = average_gasPrice * [ ( DebtAuctionHouse.terminate_auction_prematurely()_gas * #_of_Debt_Auctions     ) +
-                               ( PreSettlementSurplusAuctionHouse.terminate_auction_prematurely()_gas * #_of_Surplus_Auctions     ) +
-                               ( GlobalSettlement.freezeCollateralType(CollateralType)_gas  * #_of_Collateral_Types  ) +
-                               ( GlobalSettlement.fastTrackAuction()_gas     * #_of_Collateral_Auctions     ) +
-                               ( GlobalSettlement.processSAFE()_gas     * #_of_Underwater_SAFEs ) +
-                               ( AccountingEngine.settleDebt()_gas                              ) +
-                               ( GlobalSettlement.setOutstandingCoinSupply()_gas                              ) +
-                               ( GlobalSettlement.calculateCashPrice(CollateralType)_gas  * #_of_Collateral_Types  ) ]
+min_ETH = average_gasPrice * [ ( DebtAuctionHouse.terminate_auction_prematurely()_gas * #_of_Debt_Auctions ) +
+                               ( PreSettlementSurplusAuctionHouse.terminate_auction_prematurely()_gas * #_of_Surplus_Auctions ) +
+                               ( GlobalSettlement.freezeCollateralType(CollateralType)_gas  * #_of_Collateral_Types ) +
+                               ( GlobalSettlement.fastTrackAuction()_gas * #_of_Collateral_Auctions     ) +
+                               ( GlobalSettlement.processSAFE()_gas * #_of_Underwater_SAFEs ) +
+                               ( AccountingEngine.settleDebt()_gas ) +
+                               ( GlobalSettlement.setOutstandingCoinSupply()_gas ) +
+                               ( GlobalSettlement.calculateCashPrice(CollateralType)_gas * #_of_Collateral_Types ) ]
 ```
 
 Here's an example from a recent Kovan test of the `settlement-keeper`; note that the gasCost arguments in this example are conservative upper bounds, computed from `web3.eth.estimateGas()`, which calls the [eth_estimateGas JSON-RPC method](https://github.com/ethereum/wiki/wiki/JSON-RPC#eth_estimategas).
 ```
-min_ETH = 15 GWei * [ ( 196605 * 1  ) +
+min_ETH = 50 GWei * [ ( 196605 * 1  ) +
                       ( 154892 * 1  ) +
                       ( 187083 * 3  ) +
                       ( 389191 * 3  ) +
@@ -50,8 +49,8 @@ min_ETH = 15 GWei * [ ( 196605 * 1  ) +
                       ( 166397      ) +
                       ( 157094      ) +
                       ( 159159 * 3  ) ]
-min_ETH = 15 GWei * 9583257
-min_ETH ~= 0.1437 ETH
+min_ETH = 50 GWei * 9583257
+min_ETH ~= 0.479 ETH
 ```
 
 
@@ -85,9 +84,8 @@ Make a run-settlement-keeper.sh to easily spin up the settlement-keeper.
 	--network 'kovan' \
 	--eth-from '0xABCAddress' \
 	--eth-key 'key_file=/full/path/to/keystoreFile.json,pass_file=/full/path/to/passphrase/file.txt' \
-	--vat-deployment-block 14374534
+	--safe-engine-deployment-block 14374534
 ```
-
 
 ## Testing
 
