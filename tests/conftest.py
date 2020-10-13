@@ -22,7 +22,7 @@ from os import path
 from web3 import Web3, HTTPProvider
 
 from pyflex import Address
-from pyflex.auctions import FixedDiscountCollateralAuctionHouse, EnglishCollateralAuctionHouse, DebtAuctionHouse
+from pyflex.auctions import DebtAuctionHouse
 from pyflex.auctions import PreSettlementSurplusAuctionHouse
 from pyflex.deployment import GfDeployment
 from pyflex.gf import SAFEEngine, AccountingEngine, LiquidationEngine, TaxCollector
@@ -30,19 +30,6 @@ from pyflex.shutdown import ESM, GlobalSettlement
 from pyflex.keys import register_keys
 
 from src.settlement_keeper import SettlementKeeper
-
-'''
-@pytest.fixture(scope='session')
-def new_deployment() -> Deployment:
-    return Deployment()
-
-
-@pytest.fixture()
-def deployment(new_deployment: Deployment) -> Deployment:
-    new_deployment.reset()
-    return new_deployment
-
-'''
 
 @pytest.fixture(scope="session")
 def web3() -> Web3:
@@ -63,7 +50,6 @@ def web3() -> Web3:
 
     assert len(web3.eth.accounts) > 3
     return web3
-
 
 @pytest.fixture(scope="session")
 def our_address(web3) -> Address:

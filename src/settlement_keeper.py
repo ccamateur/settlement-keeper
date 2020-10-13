@@ -18,22 +18,17 @@
 import argparse
 import logging
 import sys
-import time
 from datetime import datetime, timezone
-import types
-from os import path
 from typing import List
 
 from web3 import Web3, HTTPProvider
 
 from pyflex import Address
-from pyflex.gas import DefaultGasPrice, FixedGasPrice
-from pyflex.auctions import FixedDiscountCollateralAuctionHouse, EnglishCollateralAuctionHouse, DebtAuctionHouse
-from pyflex.auctions import PreSettlementSurplusAuctionHouse
+from pyflex.gas import DefaultGasPrice
+from pyflex.auctions import FixedDiscountCollateralAuctionHouse, EnglishCollateralAuctionHouse
 from pyflex.keys import register_keys
 from pyflex.lifecycle import Lifecycle
 from pyflex.numeric import Wad, Rad, Ray
-from pyflex.token import ERC20Token
 from pyflex.deployment import GfDeployment
 from pyflex.gf import CollateralType, SAFE
 
@@ -75,14 +70,7 @@ class SettlementKeeper:
                             help="Json description of all the system addresses (e.g. /Full/Path/To/configFile.json)")
 
         parser.add_argument("--safe-engine-deployment-block", type=int, required=False, default=0,
-                            help=" Block that the SAFEEngine from gf-deployment-file was deployed at (e.g. 8836668")
-
-        parser.add_argument("--vulcanize-endpoint", type=str, required=False,
-                            help="When specified, frob history will be queried from a VulcanizeDB lite node, "
-                                 "reducing load on the Ethereum node for Vault query")
-
-        parser.add_argument("--vulcanize-key", type=str,required=False,
-                            help="API key for the Vulcanize endpoint")
+                            help="Block that the SAFEEngine from gf-deployment-file was deployed at (e.g. 8836668")
 
         parser.add_argument("--max-errors", type=int, default=100,
                             help="Maximum number of allowed errors before the keeper terminates (default: 100)")
@@ -97,13 +85,13 @@ class SettlementKeeper:
         parser.add_argument("--gas-maximum", type=str, default=5000, help="gas strategy tuning")
 
 
-
         parser.set_defaults(settlement_facilitated=False)
         self.arguments = parser.parse_args(args)
 
         self.web3 = kwargs['web3'] if 'web3' in kwargs else \
                 Web3(HTTPProvider(endpoint_uri=f"http://{self.arguments.rpc_host}:{self.arguments.rpc_port}",
                                   request_kwargs={"timeout": self.arguments.rpc_timeout}))
+
         self.web3.eth.defaultAccount = self.arguments.eth_from
         register_keys(self.web3, self.arguments.eth_key)
         self.our_address = Address(self.arguments.eth_from)
@@ -171,8 +159,8 @@ class SettlementKeeper:
 
     def check_settlement(self):
         """ After live is 0 for 12 block confirmations, facilitate the processing period, then set_outstanding_coin_supply """
-        blockNumber = self.web3.eth.blockNumber
-        self.logger.info(f'Checking settlement on block {blockNumber}')
+        block_number = self.web3.eth.blockNumber
+        self.logger.info(f'Checking settlement on block {block_number}')
 
         contract_enabled = self.geb.global_settlement.contract_enabled()
 
@@ -183,7 +171,7 @@ class SettlementKeeper:
             shutdown_time = self.geb.global_settlement.shutdown_time()
             shutdown_cooldown = self.geb.global_settlement.shutdown_cooldown()
             shutdown_time_in_unix = shutdown_time.replace(tzinfo=timezone.utc).timestamp()
-            now = self.web3.eth.getBlock(blockNumber).timestamp
+            now = self.web3.eth.getBlock(block_number).timestamp
             set_outstanding_coin_supply_time = shutdown_time_in_unix + shutdown_cooldown 
 
             if not self.settlement_facilitated:
@@ -284,36 +272,29 @@ class SettlementKeeper:
 
         for collateral_type in collateral_types:
 
-            safe_history = SAFEHistory(self.web3,
-                                     self.geb,
-                                     collateral_type,
-                                     self.deployment_block,
-                                     self.arguments.vulcanize_endpoint,
-                                     self.arguments.vulcanize_key)
+            safe_history = SAFEHistory(self.web3, self.geb, collateral_type, self.deployment_block, None, None)
 
             safes = safe_history.get_safes()
 
             self.logger.info(f'Collected {len(safes)} from {collateral_type}')
-            print(f'Collected {len(safes)} from {collateral_type}')
 
-            i = 0
-            for safe in safes.values():
+            for i, safe in enumerate(safes.values()):
                 safe.collateral_type = self.geb.safe_engine.collateral_type(safe.collateral_type.name)
                 safety_ratio = self.geb.oracle_relayer.safety_c_ratio(safe.collateral_type)
+
                 debt = Ray(safe.generated_debt) * safe.collateral_type.accumulated_rate
                 collateral = Ray(safe.locked_collateral) * safe.collateral_type.safety_price * safety_ratio
+
                 # Check if underwater ->  
                 # safe.generated_debt * collateral_type.accumulated_rate > 
                 # safe.locked_collateral * collateral_type.safety_price * oracle_relayer.safety_c_ratio[collateral_type]
                 if debt > collateral:
                     underwater_safes.append(safe)
-                i += 1;
 
                 if i % 100 == 0:
                     self.logger.info(f'Processed {i} safes of {collateral_type.name}')
 
         return underwater_safes
-
 
     def all_active_auctions(self) -> dict:
         """ Aggregates active auctions that meet criteria to be called after Settlement """
@@ -329,46 +310,47 @@ class SettlementKeeper:
         }
 
 
-    def settlement_active_auctions(self, parentObj) -> List:
+    def settlement_active_auctions(self, parent_obj) -> List:
         """ Returns auctions that meet the requiremenets to be called by
-        GlobalSettlement.fastTrackAuction, SurplusAuctionHouse.terminateAuctionPrematurely and 
-        DebtAuctionHouse.terminateAuctionPrematurely
+            GlobalSettlement.fastTrackAuction, SurplusAuctionHouse.terminateAuctionPrematurely and 
+            DebtAuctionHouse.terminateAuctionPrematurely
         """
         active_auctions = []
-        auction_count = parentObj.auctions_started()
+        auction_count = parent_obj.auctions_started()
 
         # english collateral auction
-        if isinstance(parentObj, EnglishCollateralAuctionHouse):
+        if isinstance(parent_obj, EnglishCollateralAuctionHouse):
             for index in range(auction_count + 1):
-                bid = parentObj._bids(index)
+                bid = parent_obj._bids(index)
                 if bid.high_bidder != Address("0x0000000000000000000000000000000000000000"):
                     if bid.bid_amount < bid.amount_to_raise:
                         active_auctions.append(bid)
 
         # fixed discount collateral auction
-        elif isinstance(parentObj, FixedDiscountCollateralAuctionHouse):
+        elif isinstance(parent_obj, FixedDiscountCollateralAuctionHouse):
             for index in range(auction_count + 1):
-                bid = parentObj._bids(index)
+                bid = parent_obj._bids(index)
                 if bid.amount_to_sell != Wad(0) and bid.amount_to_raise != Rad(0):
                     active_auctions.append(bid)
 
         # surplus and debt auctions
         else:
             for index in range(auction_count + 1):
-                bid = parentObj._bids(index)
+                bid = parent_obj._bids(index)
                 if bid.high_bidder != Address("0x0000000000000000000000000000000000000000"):
                     active_auctions.append(bid)
 
         return active_auctions
 
     def terminate_auctions_prematurely(self, surplus_bids: List, debt_bids: List):
-        """ Calls terminate_auction_prematurely on all PreSettlementSurplusAuctionHouse and DebtAuctionHouseand auctions ids that meet the shutdown criteria """
+        """ Calls terminate_auction_prematurely on all PreSettlementSurplusAuctionHouse and DebtAuctionHouse 
+            auctions ids that meet the shutdown criteria 
+        """
         for bid in surplus_bids:
             self.geb.surplus_auction_house.terminate_auction_prematurely(bid.id).transact(gas_price=self.gas_price)
 
         for bid in debt_bids:
             self.geb.debt_auction_house.terminate_auction_prematurely(bid.id).transact(gas_price=self.gas_price)
-
 
 if __name__ == '__main__':
     SettlementKeeper(sys.argv[1:]).main()

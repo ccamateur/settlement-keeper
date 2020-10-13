@@ -18,12 +18,7 @@
 
 import pytest
 
-from datetime import datetime, timedelta, timezone
-import time
-from typing import List
-import logging
-
-from web3 import Web3
+from datetime import datetime, timezone
 
 from src.settlement_keeper import SettlementKeeper
 
@@ -34,14 +29,14 @@ from pyflex.auctions import EnglishCollateralAuctionHouse, FixedDiscountCollater
 from pyflex.deployment import GfDeployment
 from pyflex.gf import Collateral, CollateralType, SAFE
 from pyflex.numeric import Wad, Ray, Rad
-from pyflex.shutdown import ESM, GlobalSettlement
+from pyflex.shutdown import ESM
 
 from tests.test_auctions import create_debt, check_active_auctions, max_delta_debt
 from tests.test_gf import mint_prot, wrap_eth, wrap_modify_safe_collateralization, set_collateral_price, get_collateral_price
 from tests.helpers import time_travel_by
 
 
-def open_safe(geb: GfDeployment, collateral: Collateral, address: Address, debtMultiplier: int = 1):
+def open_safe(geb: GfDeployment, collateral: Collateral, address: Address, debt_multiplier: int = 1):
     assert isinstance(geb, GfDeployment)
     assert isinstance(collateral, Collateral)
     assert isinstance(address, Address)
@@ -49,10 +44,10 @@ def open_safe(geb: GfDeployment, collateral: Collateral, address: Address, debtM
     collateral.approve(address)
     wrap_eth(geb, address, Wad.from_number(20))
     assert collateral.adapter.join(address, Wad.from_number(20)).transact(from_address=address)
-    wrap_modify_safe_collateralization(geb, collateral, address, Wad.from_number(20), Wad.from_number(20 * debtMultiplier))
+    wrap_modify_safe_collateralization(geb, collateral, address, Wad.from_number(20), Wad.from_number(20 * debt_multiplier))
 
-    assert geb.safe_engine.global_debt() >= Rad(Wad.from_number(20 * debtMultiplier))
-    assert geb.safe_engine.coin_balance(address) >= Rad.from_number(20 * debtMultiplier)
+    assert geb.safe_engine.global_debt() >= Rad(Wad.from_number(20 * debt_multiplier))
+    assert geb.safe_engine.coin_balance(address) >= Rad.from_number(20 * debt_multiplier)
 
 
 def wipe_debt(geb: GfDeployment, collateral: Collateral, address: Address):
@@ -283,9 +278,9 @@ def fire_esm(geb: GfDeployment, deployment_address: Address):
     assert geb.esm.settled()
     assert not geb.global_settlement.contract_enabled()
 
-def print_out(testName: str):
+def print_out(test_name: str):
     print("")
-    print(f"{testName}")
+    print(f"{test_name}")
     print("")
 
 pytest.global_safes = []
@@ -385,7 +380,7 @@ class TestSettlementKeeper:
         prepare_esm(geb, our_address)
         fire_esm(geb, our_address)
         assert keeper.confirmations == 0
-        for i in range(0,12):
+        for _ in range(0, 12):
             time_travel_by(geb.web3, 1)
             keeper.check_settlement()
         assert keeper.confirmations == 12
@@ -396,8 +391,8 @@ class TestSettlementKeeper:
         shutdown_time = geb.global_settlement.shutdown_time()
         shutdown_cooldown = geb.global_settlement.shutdown_cooldown()
         shutdown_time_in_unix = shutdown_time.replace(tzinfo=timezone.utc).timestamp()
-        blockNumber = geb.web3.eth.blockNumber
-        now = geb.web3.eth.getBlock(blockNumber).timestamp
+        block_number = geb.web3.eth.blockNumber
+        now = geb.web3.eth.getBlock(block_number).timestamp
         set_outstanding_coin_supply_time = shutdown_time_in_unix + shutdown_cooldown
         assert now >= set_outstanding_coin_supply_time
 

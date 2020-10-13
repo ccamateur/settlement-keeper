@@ -12,11 +12,12 @@ BLOCKCHAIN_NETWORK=
 # Account used to pay for gas
 ETH_FROM_ADDRESS=
 
-# URL of Vulcanize instance to use
-VULCANIZE_URL=
-
 # ETH Gas Station API key
 ETH_GASSTATION_API_KEY=
 
-# For ease of use, do not change the location of ETH account keys, note that account files should always be placed in the secrets directory of the cage-keeper, and files named as indicated.
+# For ease of use, do not change the location of ETH account keys.
+# Account files should always be placed in the secrets directory of the settlement-keeper, and files named as indicated.
 ETH_ACCOUNT_KEY=key_file=/opt/keeper/settlement-keeper/secrets/keystore.json,pass_file=/opt/keeper/settlement-keeper/secrets/password.txt
+
+# Block the SAFEEngine was deployed
+DEPLOYMENT_BLOCK=
