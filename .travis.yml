@@ -1,32 +1,32 @@
 language: python
+
 os:
 - linux
+
 python:
 - 3.6
+
+services: docker
+
 cache: pip
+
 before_cache:
 - rm -f $HOME/.cache/pip/log/debug.log
+
 before_install:
 - sudo apt-get update
 - sudo apt-get -y install python3-pip
 - sudo apt-get install python3-setuptools
 - sudo pip3 install awscli
+
 install:
 - pip install $(cat requirements.txt $(find lib -name requirements.txt | sort) | sort
   | uniq | sed 's/ *== */==/g')
 - pip install -r requirements-dev.txt
+
 script:
-- "./test.sh"
+- ./.ci/leaks.sh
+- ./test.sh
+
 after_success:
 - codecov
-  #deploy:
-  #- provider: script
-  #  script: bash ./.travis/build-deploy.sh test us-east-2
-  #  on:
-  #    branch: master
-  #notifications:
-  #  email: false
-  #env:
-  #  global:
-  #  - secure: A5YPf65cP8uE+n3Uny+Ub2gumlfWt7D8ULVCVQ/PO2jFp/XKX5IJaAPiQKrdaAOlv9A1bfleu+pDKxLuM9tKidP/kji7bd1IxEjjCPMPq7XWWDt/aKghS2+GEGII6EVm8+4oH7tBI8UNtRNnfKbgIKUSDfrlQ5BLxscnx2k73DfGBaCPW30aBl0xeoZn814HLiWWxOsBgRJ//MGoW7x/Jdy2GuoeHAco4NSowk1X6WbijSid9SHaejdH/5TNUH9mKHJSH3ycTA5Br/2pw+CxjBOOctLE1PX+3Fwm/Fvhynp2rYidYn+XnPx9PSzwq5UMC28v+BDL9L/YuvguPce5HDEPqLpR+MPvhnxGOEFiaUI9sduVV7p2KRHFFsBEGTqmNGkozxkAdU7KV4qysTRSapueAV7i0cIpZbOl4dNGpYpuBi4gbBv7qkaAqKczatJ5dzXHIGxcAUrRokokopJf2C6o4FCmHxzDWnxjXUdOk/fj7NfNukloKh2w4nTz2QvOhmpEVEKhPhRWN3a7QFBNkCHgWllfNH6SEXOKFa2YhPUj1DAeKpvVp1iOeolxBtS8VhSbd5wHMsxW9XwD7QMgpzqF0vgxQ6MtuXwXu3SHlx38YDIeAxSKplRFWqfdbNjkkgIFktS3DqS6K98V+jWIoMLyex2Wk3rs7TJPs9P5YTA=
-  # - secure: oM/pC0amuiFu00ZzEOvXAPPAXeXfULyzGJyuTZqhDd+ci2VMGNSHO91RFKFCVi9ImupHczNXSBl9Gsq3W8a8mLYWfEAZTD9+XageB9fXAbgZF2n2AoRJIJI3FpHv9ht0RlbeGRHwR9SgrYfIGJcgW2LM6RcS+dmRkbecbi0aMifCIOOG27YpKIItpeBMYnxPTNm9OiqKbGZp0SrLHhR7IBRDJ1sZm3Y+BOwGQhR2CBZ/9ZqxoRayOmmAGfeZz5zEAMz3q07QzHCi+D04btQ+TDe3vJH5+U6E4rWJWXd9WMnEBOtQftRkm7EFYX7Jf/4ZqzDGoS60c2iCsRSddjHNuwbzwMC5UWLzlZpHNY+GAguEDQtoZWRLNes95d0WX4AO12dH8TxfTaXUD/LS1plgNW6cL259O/1ivTV6OunJE8IJUGpPyBxfVkFtQaybVleGenqstFIvRDWf6+Gol9O4aLK86lhUHuIj0KodatkMj0NL+lmvU6vhyGCJAmGxzdgmiuzZdXontBPkLbxGwQU/qrI7+NfZoza/k9SqIinlhU9V41Bvqt4csaQwg5quFYujeV/B12d6w1IUomdi1fYmpH8WPduTU2C4lvZ+1hcyH2TlO580kcpmzjwspPctuwAY1ED2CykhjcBkiMJzqKMYtdfDzw8o3OhQwpld2QX0ZWE=
