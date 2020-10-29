@@ -60,6 +60,10 @@ class SettlementKeeper:
         parser.add_argument('--previous-settlement', dest='settlement_facilitated', action='store_true',
                             help='Include this argument if this keeper previously helped to facilitate the processing phase of ES')
 
+        parser.add_argument("--graph-endpoint", type=str, default=None,
+                            help="When specified, safe history will be initialized from a Graph node, "
+                                 "reducing load on the Ethereum node for collateral auctions")
+
         parser.add_argument("--eth-from", type=str, required=True,
                             help="Ethereum address from which to send transactions; checksummed (e.g. '0x12AebC')")
 
@@ -272,7 +276,7 @@ class SettlementKeeper:
 
         for collateral_type in collateral_types:
 
-            safe_history = SAFEHistory(self.web3, self.geb, collateral_type, self.deployment_block, None, None)
+            safe_history = SAFEHistory(self.web3, self.geb, collateral_type, self.deployment_block, self.arguments.graph_endpoint)
 
             safes = safe_history.get_safes()
 
