@@ -45,11 +45,8 @@ class SettlementKeeper:
 
         parser = argparse.ArgumentParser("settlement-keeper")
 
-        parser.add_argument("--rpc-host", type=str, default="localhost",
-                            help="JSON-RPC host (default: `localhost')")
-
-        parser.add_argument("--rpc-port", type=int, default=8545,
-                            help="JSON-RPC port (default: `8545')")
+        parser.add_argument("--rpc-uri", type=str, default="http://localhost:8545",
+                            help="JSON-RPC host (default: `http://localhost:8545')")
 
         parser.add_argument("--rpc-timeout", type=int, default=1200,
                             help="JSON-RPC timeout (in seconds, default: 10)")
@@ -93,7 +90,7 @@ class SettlementKeeper:
         self.arguments = parser.parse_args(args)
 
         self.web3 = kwargs['web3'] if 'web3' in kwargs else \
-                Web3(HTTPProvider(endpoint_uri=f"http://{self.arguments.rpc_host}:{self.arguments.rpc_port}",
+                Web3(HTTPProvider(endpoint_uri=self.arguments.rpc_uri,
                                   request_kwargs={"timeout": self.arguments.rpc_timeout}))
 
         self.web3.eth.defaultAccount = self.arguments.eth_from
