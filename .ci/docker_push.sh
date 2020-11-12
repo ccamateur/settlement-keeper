@@ -1,4 +1,4 @@
 #!/bin/bash
-docker build -t reflexer/auction-keeper .
+docker build -t reflexer/settlement-keeper .
 echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
-docker push reflexer/auction-keeper
+docker push reflexer/settlement-keeper
