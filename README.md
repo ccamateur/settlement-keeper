@@ -80,7 +80,7 @@ Make a run-settlement-keeper.sh to easily spin up the settlement-keeper.
 ```
 #!/bin/bash
 /full/path/to/settlement-keeper/bin/settlement-keeper \
-	--rpc-host 'sample.ParityNode.com' \
+	--rpc-uri 'http://sample.ParityNode.com:8545' \
 	--network 'kovan' \
 	--eth-from '0xABCAddress' \
 	--eth-key 'key_file=/full/path/to/keystoreFile.json,pass_file=/full/path/to/passphrase/file.txt' \

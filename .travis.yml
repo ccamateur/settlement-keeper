@@ -29,3 +29,9 @@ script:
 
 after_success:
 - codecov
+
+deploy:
+  provider: script
+  script: ./.ci/docker_push.sh
+  on:
+    branch: master

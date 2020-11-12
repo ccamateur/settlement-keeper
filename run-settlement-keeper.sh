@@ -36,7 +36,7 @@ fi
 
 
 exec $dir/bin/settlement-keeper \
-  --rpc-host "${SERVER_ETH_RPC_HOST}" \
+  --rpc-uri "${SERVER_ETH_RPC_URI}" \
   --network "${BLOCKCHAIN_NETWORK}" \
   --eth-from "${ETH_FROM_ADDRESS}" \
   --eth-key "${ETH_ACCOUNT_KEY}" \

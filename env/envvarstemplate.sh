@@ -3,8 +3,8 @@
 # see DOCKER.md
 ##-------------------------------------------------------------------##
 
-# DNS for ETH Parity Node, ex: myparity.node.com (default: `localhost')
-SERVER_ETH_RPC_HOST=
+# DNS for ETH Parity Node, ex: http://myparity.node.com:8545 (default: `http://localhost:8545')
+SERVER_ETH_RPC_URI=
 
 # Ethereum blockchain to connect to, ex: (mainnet | kovan)
 BLOCKCHAIN_NETWORK=
