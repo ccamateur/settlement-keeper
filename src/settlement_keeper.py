@@ -270,14 +270,15 @@ class SettlementKeeper:
         """ With all safes every frobbed, compile and return a list safes that are under-collateralized up to 100%  """
 
         underwater_safes = []
-
+        
+        self.logger.info(f'Getting underwater safes for {collateral_types}')
         for collateral_type in collateral_types:
 
             safe_history = SAFEHistory(self.web3, self.geb, collateral_type, self.deployment_block, self.arguments.graph_endpoint)
 
             safes = safe_history.get_safes()
 
-            self.logger.info(f'Collected {len(safes)} from {collateral_type}')
+            self.logger.info(f'Collected {len(safes)} underwater safes from {collateral_type}')
 
             for i, safe in enumerate(safes.values()):
                 safe.collateral_type = self.geb.safe_engine.collateral_type(safe.collateral_type.name)
@@ -295,6 +296,7 @@ class SettlementKeeper:
                 if i % 100 == 0:
                     self.logger.info(f'Processed {i} safes of {collateral_type.name}')
 
+        self.logger.info(f'Found {len(underwater_safes)} underwater safes for all collateral-types')
         return underwater_safes
 
     def all_active_auctions(self) -> dict:

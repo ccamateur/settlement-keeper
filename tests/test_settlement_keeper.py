@@ -17,6 +17,7 @@
 
 
 import pytest
+import logging
 
 from datetime import datetime, timezone
 
@@ -63,7 +64,7 @@ def open_underwater_safe(geb: GfDeployment, collateral: Collateral, address: Add
     previous_eth_price = get_collateral_price(collateral)
     print(f"Previous ETH Price {previous_eth_price} USD")
     #set_collateral_price(geb, collateral, Wad.from_number(49))
-    set_collateral_price(geb, collateral, previous_eth_price / Wad.from_number(5))
+    set_collateral_price(geb, collateral, previous_eth_price / Wad.from_number(2.5))
 
     safe = geb.safe_engine.safe(collateral.collateral_type, address)
     collateral_type = geb.safe_engine.collateral_type(collateral.collateral_type.name)
@@ -113,7 +114,7 @@ def create_surplus_auction(geb: GfDeployment, deployment_address: Address, our_a
                      geb.accounting_engine.surplus_auction_amount_to_sell() + \
                      geb.accounting_engine.surplus_buffer()
     assert (geb.safe_engine.debt_balance(geb.accounting_engine.address) - \
-            geb.accounting_engine.debt_queue()) - geb.accounting_engine.total_on_auction_debt() == Rad(0)
+            geb.accounting_engine.total_queued_debt()) - geb.accounting_engine.total_on_auction_debt() == Rad(0)
     assert geb.accounting_engine.auction_surplus().transact()
     auction_id = surplus_auction_house.auctions_started()
     assert auction_id == 1
@@ -294,16 +295,16 @@ class TestSettlementKeeper:
 
     def test_get_underwater_safes(self, geb: GfDeployment, keeper: SettlementKeeper, guy_address: Address, our_address: Address):
         print_out("test_get_underwater_safes")
+        collateral_types = keeper.get_collateral_types()
+        prev_underwater_safes = len(keeper.get_underwater_safes(collateral_types))
 
         previous_eth_price = open_underwater_safe(geb, geb.collaterals['ETH-A'], guy_address)
         open_safe(geb, geb.collaterals['ETH-C'], our_address)
 
-        collateral_types = keeper.get_collateral_types()
-
         safes = keeper.get_underwater_safes(collateral_types)
         assert type(safes) is list
         assert all(isinstance(x, SAFE) for x in safes)
-        assert len(safes) == 1
+        assert len(safes) == prev_underwater_safes + 1
         assert safes[0].address.address == guy_address.address
 
         ## We've multiplied by a small Ray amount to counteract
