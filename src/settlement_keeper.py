@@ -278,7 +278,7 @@ class SettlementKeeper:
 
             safes = safe_history.get_safes()
 
-            self.logger.info(f'Collected {len(safes)} underwater safes from {collateral_type}')
+            self.logger.info(f'Collected {len(safes)} safes from {collateral_type}')
 
             for i, safe in enumerate(safes.values()):
                 safe.collateral_type = self.geb.safe_engine.collateral_type(safe.collateral_type.name)
