@@ -39,18 +39,18 @@ min_ETH = average_gasPrice * [ ( DebtAuctionHouse.terminate_auction_prematurely(
                                ( GlobalSettlement.calculateCashPrice(CollateralType)_gas * #_of_Collateral_Types ) ]
 ```
 
-Here's an example from a recent Kovan test of the `settlement-keeper`; note that the gasCost arguments in this example are conservative upper bounds, computed from `web3.eth.estimateGas()`, which calls the [eth_estimateGas JSON-RPC method](https://github.com/ethereum/wiki/wiki/JSON-RPC#eth_estimategas).
+Here's an example from the PRAI mainnet demo of the `settlement-keeper`; the `terminate_auction_prematurely()`, `fastTrackAuction()`, `settleDebt()` calls were not done on PRAI settlement and these gas costs are estimates using from MakerDAO's [cage-keeper](https://github.com/makerdao/cage-keeper) 
 ```
 min_ETH = 50 GWei * [ ( 196605 * 1  ) +
                       ( 154892 * 1  ) +
-                      ( 187083 * 3  ) +
-                      ( 389191 * 3  ) +
-                      ( 223399 * 30 ) +
+                      ( 98289 * 1  ) +
+                      ( 389191 * 1  ) +
+                      ( 115782 * 30 ) +
                       ( 166397      ) +
-                      ( 157094      ) +
-                      ( 159159 * 3  ) ]
-min_ETH = 50 GWei * 9583257
-min_ETH ~= 0.479 ETH
+                      ( 53625       ) +
+                      ( 56635 * 1  ) ]
+min_ETH = 50 GWei * 4589095
+min_ETH ~= 0.229 ETH
 ```
 
 
